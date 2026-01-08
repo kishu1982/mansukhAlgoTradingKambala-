@@ -82,14 +82,14 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
 
         // 📈 PRICE FEED COMES HERE
         quote: (tick: any) => {
-          console.log(
-            `📈 PRICE | ${tick.e || ''}|${tick.tk || ''} | LTP: ${
-              tick.lp
-            } | Time: ${tick.ft || ''}`,
-          );
-          tick.lp > 0 || tick.bp1 > 0 || tick.sp1 > 0
-            ? console.log('tick data : ', tick)
-            : '';
+          // console.log(
+          //   `📈 PRICE | ${tick.e || ''}|${tick.tk || ''} | LTP: ${
+          //     tick.lp
+          //   } | Time: ${tick.ft || ''}`,
+          // );
+          // tick.lp > 0 || tick.bp1 > 0 || tick.sp1 > 0
+          //   ? console.log('tick data : ', tick)
+          //   : '';
         },
 
         // 📦 ORDER UPDATES (optional)
