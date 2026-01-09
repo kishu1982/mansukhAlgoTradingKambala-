@@ -113,19 +113,40 @@ export class MarketController {
   /* ================= OPTION CHAIN ================= */
 
   @Post('option-chain')
-  async getOptionChain(@Body() body: {
-    exch: string;
-    tsym: string;
-    strprc: number | string;
-    cnt?: number | string;
-  }) {
+  async getOptionChain(
+    @Body()
+    body: {
+      exch: string;
+      tsym: string;
+      strprc: number | string;
+      cnt?: number | string;
+    },
+  ) {
     if (!body?.exch || !body?.tsym || body?.strprc === undefined) {
-      throw new BadRequestException(
-        'exch, tsym and strprc are required',
-      );
+      throw new BadRequestException('exch, tsym and strprc are required');
     }
 
     return this.marketService.getOptionChain(body);
   }
 
+  /* ================= EOD CHART DATA ================= */
+
+  @Post('eod-chart')
+  async getEodChartData(
+    @Body()
+    body: {
+      exchange: string;
+      tradingsymbol: string;
+      from: number;
+      to?: number;
+    },
+  ) {
+    if (!body.exchange || !body.tradingsymbol || !body.from) {
+      throw new BadRequestException(
+        'exchange, tradingsymbol and from are required',
+      );
+    }
+
+    return this.marketService.getEodChartData(body);
+  }
 }

@@ -509,45 +509,45 @@ export class MarketService {
   //     throw new Error(`EOD fetch failed: ${err.message}`);
   //   }
   // }
-  async getDailyPriceSeries(data: {
-    exchange: string;
-    tradingsymbol: string;
-    startDate: string; // YYYY-MM-DD OR epoch
-    endDate?: string; // YYYY-MM-DD OR epoch
-  }) {
-    const { exchange, tradingsymbol, startDate, endDate } = data;
+  // async getDailyPriceSeries(data: {
+  //   exchange: string;
+  //   tradingsymbol: string;
+  //   startDate: string; // YYYY-MM-DD OR epoch
+  //   endDate?: string; // YYYY-MM-DD OR epoch
+  // }) {
+  //   const { exchange, tradingsymbol, startDate, endDate } = data;
 
-    if (!exchange || !tradingsymbol || !startDate) {
-      throw new BadRequestException(
-        'exchange, tradingsymbol and startDate are required',
-      );
-    }
+  //   if (!exchange || !tradingsymbol || !startDate) {
+  //     throw new BadRequestException(
+  //       'exchange, tradingsymbol and startDate are required',
+  //     );
+  //   }
 
-    const api = new NorenRestApi();
-    this.tokenService.prepareSdk(api);
+  //   const api = new NorenRestApi();
+  //   this.tokenService.prepareSdk(api);
 
-    // 🔥 Convert to epoch seconds
-    const starttime = this.toEpoch(startDate);
-    const endtime = endDate ? this.toEpoch(endDate, true) : undefined;
+  //   // 🔥 Convert to epoch seconds
+  //   const starttime = this.toEpoch(startDate);
+  //   const endtime = endDate ? this.toEpoch(endDate, true) : undefined;
 
-    const params = {
-      exchange,
-      tsym: tradingsymbol,
-      starttime,
-      endtime,
-    };
+  //   const params = {
+  //     exchange,
+  //     tsym: tradingsymbol,
+  //     starttime,
+  //     endtime,
+  //   };
 
-    this.logger.debug(
-      `📤 SDK get_daily_price_series → ${JSON.stringify(params)}`,
-    );
+  //   this.logger.debug(
+  //     `📤 SDK get_daily_price_series → ${JSON.stringify(params)}`,
+  //   );
 
-    try {
-      return await api.get_daily_price_series(params);
-    } catch (err) {
-      this.logger.error('❌ EOD fetch failed', err.message);
-      throw err;
-    }
-  }
+  //   try {
+  //     return await api.get_daily_price_series(params);
+  //   } catch (err) {
+  //     this.logger.error('❌ EOD fetch failed', err.message);
+  //     throw err;
+  //   }
+  // }
 
   /* ================= HELPERS ================= */
 
@@ -566,4 +566,112 @@ export class MarketService {
 
     return Math.floor(d.getTime() / 1000);
   }
+
+  /* ================= EOD CHART DATA ================= */
+
+  async getEodChartData(data: {
+    exchange: string;
+    tradingsymbol: string;
+    from: number; // unix timestamp (seconds)
+    to?: number; // unix timestamp (seconds)
+  }) {
+    try {
+      if (!data.exchange || !data.tradingsymbol || !data.from) {
+        throw new BadRequestException(
+          'exchange, tradingsymbol and from are required',
+        );
+      }
+
+      const token = this.tokenService.getToken();
+      const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
+
+      if (!baseUrl) {
+        throw new Error('NOREN_BASE_URL not configured');
+      }
+
+      /**
+       * 🔥 API expects this EXACT format
+       * sym = "NSE:INFY-EQ"
+       */
+      const jData: any = {
+        sym: `${data.exchange}:${data.tradingsymbol}`,
+        from: Number(data.from),
+      };
+
+      if (data.to) {
+        jData.to = Number(data.to);
+      }
+
+      const payload = `jData=${JSON.stringify(jData)}`;
+
+      this.logger.debug(`📤 EODChartData → ${payload}`);
+
+      const response = await axios.post(`${baseUrl}/EODChartData`, payload, {
+        headers: {
+          Authorization: `Bearer ${token.Access_token}`,
+          'Content-Type': 'application/json', // 🔥 MUST MATCH CURL
+        },
+        transformRequest: [(d) => d],
+        timeout: 10000,
+      });
+
+      if (response.data?.stat === 'Not_Ok') {
+        throw new BadRequestException({
+          message: 'EOD chart fetch failed',
+          error: response.data.emsg,
+          raw: response.data,
+        });
+      }
+
+     // return response.data;
+     return {
+       symbol: jData.sym,
+       candles: this.normalizeEodData(response.data),
+     };
+
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        this.logger.error(
+          '❌ EOD Axios error',
+          error.response?.data || error.message,
+        );
+
+        throw new BadRequestException({
+          message: 'Failed to fetch EOD chart data',
+          error: error.response?.data || error.message,
+        });
+      }
+
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      this.logger.error('❌ EOD unexpected error', error.message, error.stack);
+
+      throw new InternalServerErrorException(
+        'Unexpected error while fetching EOD chart data',
+      );
+    }
+  }
+
+  private normalizeEodData(raw: any[]): any[] {
+    if (!Array.isArray(raw)) return [];
+
+    return raw.map((row) => {
+      // Parse JSON string
+      const parsed = typeof row === 'string' ? JSON.parse(row) : row;
+
+      return {
+        date: parsed.time, // keep original or convert below
+        timestamp: Number(parsed.ssboe),
+        open: Number(parsed.into),
+        high: Number(parsed.inth),
+        low: Number(parsed.intl),
+        close: Number(parsed.intc),
+        volume: Number(parsed.intv),
+      };
+    });
+  }
+
+  // eod data logic ends //
 }
