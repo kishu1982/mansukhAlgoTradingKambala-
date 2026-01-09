@@ -40,10 +40,11 @@ export class StrategyService {
    */
   onTick(tickData: any): void {
     // Raw tick logging
+    this.logger.log(`Tick Received: ${JSON.stringify(tickData.lp)}`);
     //this.logger.log(`Tick Received: ${JSON.stringify(tickData)}`);
-    // tickData.lp > 0 || tickData.bp1 > 0 || tickData.sp1 > 0
-    //   ? console.log('tick data : ', tickData)
-    //   : '';
+    tickData.lp > 0 || tickData.bp1 > 0 || tickData.sp1 > 0
+      ? console.log('tick data : ', tickData)
+      : '';
     // Later you can route to strategies:
     // this.runScalpingStrategy(tickData);
     // this.runVWAPStrategy(tickData);

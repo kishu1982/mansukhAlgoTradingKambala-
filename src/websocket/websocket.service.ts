@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { TokenService } from '../token/token.service';
 import { StrategyService } from 'src/strategy/strategy.service';
+import { WS_SUBSCRIPTIONS } from './subscriptions/ws.subscriptions';
 
 const NorenWebSocket = require('norenrestapi/lib/websocket');
 
@@ -65,12 +66,14 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
           this.logger.log('✅ Noren WebSocket Connected');
 
           // 🔔 SUBSCRIBE AFTER CONNECT
-          this.subscribe([
-            'NSE|22', // RELIANCE
-            'NSE|1594', // INFY
-            'NFO|35003', // NIFTY FUT
-            'MCX|472780', // GOLDM
-          ]);
+          // this.subscribe([
+          //   'NSE|22', // RELIANCE
+          //   'NSE|1594', // INFY
+          //   'NFO|35003', // NIFTY FUT
+          //   'MCX|472780', // GOLDM
+          // ]);
+          // 🔔 subscribe from central config
+          this.subscribeGroup('DEFAULT');
         },
 
         socket_close: () => {
@@ -166,6 +169,18 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
     } catch {
       return 'Non-serializable WebSocket error';
     }
+  }
+
+  //Subscribe using group name
+  private subscribeGroup(group: keyof typeof WS_SUBSCRIPTIONS) {
+    const symbols = WS_SUBSCRIPTIONS[group];
+
+    if (!symbols?.length) {
+      this.logger.warn(`No WS subscriptions found for group: ${group}`);
+      return;
+    }
+
+    this.subscribe(symbols);
   }
 }
 
