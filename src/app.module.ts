@@ -9,9 +9,10 @@ import { ConfigModule } from '@nestjs/config';
 import { TokenModule } from './token/token.module';
 import { WebsocketModule } from './websocket/websocket.module';
 import { DatabaseModule } from './database/database.module';
+import { StrategyModule } from './strategy/strategy.module';
 
 @Module({
-  imports: [AuthModule, NorenModule, OrdersModule, MarketModule, ConfigModule.forRoot({ isGlobal: true }), TokenModule, WebsocketModule, DatabaseModule],
+  imports: [AuthModule, NorenModule, OrdersModule, MarketModule, ConfigModule.forRoot({ isGlobal: true }), TokenModule, WebsocketModule, DatabaseModule, StrategyModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -5,6 +5,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { TokenService } from '../token/token.service';
+import { StrategyService } from 'src/strategy/strategy.service';
 
 const NorenWebSocket = require('norenrestapi/lib/websocket');
 
@@ -15,7 +16,10 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isConnected = false;
 
-  constructor(private readonly tokenService: TokenService) {}
+  constructor(
+    private readonly tokenService: TokenService,
+    private readonly strategyService: StrategyService,
+  ) {}
 
   /* ===============================
      Lifecycle
@@ -82,14 +86,17 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
 
         // 📈 PRICE FEED COMES HERE
         quote: (tick: any) => {
-          console.log(
-            `📈 PRICE | ${tick.e || ''}|${tick.tk || ''} | LTP: ${
-              tick.lp
-            } | Time: ${tick.ft || ''}`,
-          );
-          tick.lp > 0 || tick.bp1 > 0 || tick.sp1 > 0
-            ? console.log('tick data : ', tick)
-            : '';
+          // passing tick data to strategy module
+          // 🔥 Forward tick to Strategy module
+          this.strategyService.onTick(tick);
+          // console.log(
+          //   `📈 PRICE | ${tick.e || ''}|${tick.tk || ''} | LTP: ${
+          //     tick.lp
+          //   } | Time: ${tick.ft || ''}`,
+          // );
+          // tick.lp > 0 || tick.bp1 > 0 || tick.sp1 > 0
+          //   ? console.log('tick data : ', tick)
+          //   : '';
         },
 
         // 📦 ORDER UPDATES (optional)
