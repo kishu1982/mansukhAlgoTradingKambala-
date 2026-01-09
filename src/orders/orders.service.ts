@@ -24,53 +24,168 @@ export class OrdersService {
     this.api = new NorenRestApi({});
   }
 
+  // place orders
+  // async placeOrder(order: {
+  //   buy_or_sell: 'B' | 'S';
+  //   product_type: 'C' | 'M' | 'H';
+  //   exchange: string;
+  //   tradingsymbol: string;
+  //   quantity: number;
+  //   price_type: string;
+  //   price?: number;
+  //   retention?: string;
+  //   remarks?: string;
+  // }) {
+  //   const token = this.tokenService.getToken();
+  //   const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
+
+  //   const jData = {
+  //     uid: token.UID,
+  //     actid: token.Account_ID,
+  //     exch: order.exchange,
+  //     tsym: order.tradingsymbol,
+  //     qty: String(order.quantity),
+  //     prc: String(order.price ?? 0),
+  //     prd: order.product_type,
+  //     trantype: order.buy_or_sell,
+  //     prctyp: order.price_type,
+  //     ret: order.retention ?? 'DAY',
+  //     remarks: order.remarks ?? '',
+  //     ordersource: 'API', // 🔥 REQUIRED
+  //   };
+
+  //   const payload = `jData=${JSON.stringify(jData)}`;
+
+  //   this.logger.debug(`📤 RAW PlaceOrder → ${payload}`);
+
+  //   const response = await axios.post(`${baseUrl}/PlaceOrder`, payload, {
+  //     headers: {
+  //       Authorization: `Bearer ${token.Access_token}`,
+  //       'Content-Type': 'application/json',
+  //     },
+  //     transformRequest: [(d) => d],
+  //     timeout: 10000,
+  //   });
+
+  //   if (response.data?.stat === 'Not_Ok') {
+  //     throw new Error(response.data.emsg);
+  //   }
+
+  //   return response.data;
+  // }
   async placeOrder(order: {
     buy_or_sell: 'B' | 'S';
     product_type: 'C' | 'M' | 'H';
     exchange: string;
     tradingsymbol: string;
     quantity: number;
-    price_type: string;
+    price_type: 'LMT' | 'MKT' | 'SL-LMT' | 'SL-MKT';
     price?: number;
+    trigger_price?: number;
     retention?: string;
     remarks?: string;
   }) {
     const token = this.tokenService.getToken();
     const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
 
-    const jData = {
+    /* ---------------- VALIDATION (BLOCK BAD REQUESTS) ---------------- */
+
+    if (
+      (order.price_type === 'SL-LMT' || order.price_type === 'SL-MKT') &&
+      order.trigger_price === undefined
+    ) {
+      throw new BadRequestException(
+        'trigger_price is mandatory for stop loss orders',
+      );
+    }
+
+    if (
+      (order.price_type === 'LMT' || order.price_type === 'SL-LMT') &&
+      order.price === undefined
+    ) {
+      throw new BadRequestException('price is mandatory for limit orders');
+    }
+
+    /* ---------------- BUILD Noren PAYLOAD ---------------- */
+
+    const jData: any = {
       uid: token.UID,
       actid: token.Account_ID,
       exch: order.exchange,
       tsym: order.tradingsymbol,
       qty: String(order.quantity),
-      prc: String(order.price ?? 0),
       prd: order.product_type,
       trantype: order.buy_or_sell,
       prctyp: order.price_type,
       ret: order.retention ?? 'DAY',
       remarks: order.remarks ?? '',
-      ordersource: 'API', // 🔥 REQUIRED
+      ordersource: 'API',
     };
+
+    // Price (not required for MKT)
+    if (order.price_type !== 'MKT') {
+      jData.prc = String(order.price ?? 0);
+    }
+
+    // Trigger price for Stop Loss
+    if (order.price_type === 'SL-LMT' || order.price_type === 'SL-MKT') {
+      jData.trgprc = String(order.trigger_price);
+    }
 
     const payload = `jData=${JSON.stringify(jData)}`;
 
-    this.logger.debug(`📤 RAW PlaceOrder → ${payload}`);
+    this.logger.debug(`📤 PlaceOrder RAW → ${payload}`);
 
-    const response = await axios.post(`${baseUrl}/PlaceOrder`, payload, {
-      headers: {
-        Authorization: `Bearer ${token.Access_token}`,
-        'Content-Type': 'application/json',
-      },
-      transformRequest: [(d) => d],
-      timeout: 10000,
-    });
+    /* ---------------- API CALL ---------------- */
 
-    if (response.data?.stat === 'Not_Ok') {
-      throw new Error(response.data.emsg);
+    try {
+      const response = await axios.post(`${baseUrl}/PlaceOrder`, payload, {
+        headers: {
+          Authorization: `Bearer ${token.Access_token}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        transformRequest: [(d) => d],
+        timeout: 10000,
+      });
+
+      /* ---------------- BROKER ERROR ---------------- */
+
+      if (response.data?.stat === 'Not_Ok') {
+        this.logger.warn(`❌ Noren Order Error → ${response.data.emsg}`);
+
+        throw new BadRequestException({
+          message: 'Order rejected by broker',
+          brokerError: response.data.emsg,
+        });
+      }
+
+      return response.data;
+    } catch (error) {
+      /* ---------------- AXIOS ERROR ---------------- */
+
+      if (error instanceof AxiosError) {
+        const brokerMsg =
+          error.response?.data?.emsg ||
+          error.response?.data?.message ||
+          error.message;
+
+        this.logger.error(`🚨 PlaceOrder Axios Error → ${brokerMsg}`);
+
+        throw new BadRequestException({
+          message: 'Failed to place order',
+          brokerError: brokerMsg,
+          statusCode: error.response?.status,
+        });
+      }
+
+      /* ---------------- UNKNOWN ERROR ---------------- */
+
+      this.logger.error('🔥 Unexpected PlaceOrder Error', error);
+
+      throw new InternalServerErrorException({
+        message: 'Unexpected error while placing order',
+      });
     }
-
-    return response.data;
   }
 
   /* ========================= MODIFY ORDER ========================= */
@@ -79,48 +194,111 @@ export class OrdersService {
     orderno: string;
     exchange: string;
     tradingsymbol: string;
-    newquantity: number;
-    newprice_type: string;
-    newprice: number;
-    newtrigger_price: number;
+    newquantity?: number;
+    newprice_type?: 'LMT' | 'MKT' | 'SL-LMT' | 'SL-MKT';
+    newprice?: number;
+    newtrigger_price?: number;
     amo?: 'YES' | 'NO';
   }) {
     const token = this.tokenService.getToken();
     const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
 
-    const jData = {
+    /* ---------------- BASIC VALIDATION ---------------- */
+
+    if (!data.orderno || !data.exchange || !data.tradingsymbol) {
+      throw new BadRequestException(
+        'orderno, exchange and tradingsymbol are required',
+      );
+    }
+
+    /* ---------------- BUILD PAYLOAD (ONLY VALID FIELDS) ---------------- */
+
+    const jData: any = {
       uid: token.UID,
       actid: token.Account_ID,
       norenordno: data.orderno,
       exch: data.exchange,
       tsym: data.tradingsymbol,
-      qty: String(data.newquantity),
-      prctyp: data.newprice_type,
-      prc: String(data.newprice),
-      trgprc: String(data.newtrigger_price),
       amo: data.amo ?? 'NO',
     };
 
-    const payload = `jData=${JSON.stringify(jData)}`;
-
-    this.logger.debug(`📤 MODIFY ORDER → ${payload}`);
-
-    const response = await axios.post(`${baseUrl}/ModifyOrder`, payload, {
-      headers: {
-        Authorization: `Bearer ${token.Access_token}`,
-        'Content-Type': 'application/json',
-      },
-      transformRequest: [(d) => d],
-      timeout: 10000,
-    });
-
-    if (response.data?.stat === 'Not_Ok') {
-      throw new Error(response.data.emsg);
+    if (data.newquantity !== undefined) {
+      jData.qty = String(data.newquantity);
     }
 
-    return response.data;
-  }
+    if (data.newprice_type) {
+      jData.prctyp = data.newprice_type;
 
+      // 🔥 Price only for LIMIT types
+      if (data.newprice_type === 'LMT' || data.newprice_type === 'SL-LMT') {
+        if (data.newprice === undefined) {
+          throw new BadRequestException(
+            'newprice is required for limit orders',
+          );
+        }
+        jData.prc = String(data.newprice);
+      }
+
+      // 🔥 Trigger price ONLY for SL
+      if (data.newprice_type === 'SL-LMT' || data.newprice_type === 'SL-MKT') {
+        if (data.newtrigger_price === undefined) {
+          throw new BadRequestException(
+            'newtrigger_price is required for stop loss orders',
+          );
+        }
+        jData.trgprc = String(data.newtrigger_price);
+      }
+    }
+
+    const payload = `jData=${JSON.stringify(jData)}`;
+
+    this.logger.debug(`📤 MODIFY ORDER RAW → ${payload}`);
+
+    /* ---------------- API CALL ---------------- */
+
+    try {
+      const response = await axios.post(`${baseUrl}/ModifyOrder`, payload, {
+        headers: {
+          Authorization: `Bearer ${token.Access_token}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        transformRequest: [(d) => d],
+        timeout: 10000,
+      });
+
+      if (response.data?.stat === 'Not_Ok') {
+        this.logger.warn(`❌ ModifyOrder Error → ${response.data.emsg}`);
+
+        throw new BadRequestException({
+          message: 'Order modification rejected by broker',
+          brokerError: response.data.emsg,
+        });
+      }
+
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        const brokerMsg =
+          error.response?.data?.emsg ||
+          error.response?.data?.message ||
+          error.message;
+
+        this.logger.error(`🚨 ModifyOrder Axios Error → ${brokerMsg}`);
+
+        throw new BadRequestException({
+          message: 'Failed to modify order',
+          brokerError: brokerMsg,
+          statusCode: error.response?.status,
+        });
+      }
+
+      this.logger.error('🔥 Unexpected ModifyOrder Error', error);
+
+      throw new InternalServerErrorException({
+        message: 'Unexpected error while modifying order',
+      });
+    }
+  }
   /* ========================= CANCEL ORDER ========================= */
 
   async cancelOrder(orderno: string) {

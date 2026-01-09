@@ -1,58 +1,35 @@
-import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, BadRequestException, UsePipes, ValidationPipe } from '@nestjs/common';
 import { OrdersService } from './orders.service';
+import { PlaceOrderDto } from './dto/place-order.dto';
+import { ModifyOrderDto } from './dto/modify-order.dto';
 
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Post('place')
-  placeOrder(
-    @Body()
-    body: {
-      buy_or_sell: 'B' | 'S';
-      product_type: 'C' | 'M' | 'H';
-      exchange: string;
-      tradingsymbol: string;
-      quantity: number;
-      price_type: string;
-      price?: number;
-      trigger_price?: number;
-      discloseqty?: number;
-      retention?: string;
-      amo?: 'YES' | 'NO';
-      remarks?: string;
-    },
-  ) {
-    if (
-      !body.buy_or_sell ||
-      !body.product_type ||
-      !body.exchange ||
-      !body.tradingsymbol ||
-      body.quantity === undefined ||
-      !body.price_type
-    ) {
-      throw new BadRequestException('Missing required order parameters');
-    }
-
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  )
+  placeOrder(@Body() body: PlaceOrderDto) {
     return this.ordersService.placeOrder(body);
   }
 
   /* ================= MODIFY ================= */
 
   @Post('modify')
-  modifyOrder(@Body() body: any) {
-    if (
-      !body.orderno ||
-      !body.exchange ||
-      !body.tradingsymbol ||
-      body.newquantity === undefined ||
-      !body.newprice_type ||
-      body.newprice === undefined ||
-      body.newtrigger_price === undefined
-    ) {
-      throw new BadRequestException('Missing modify order parameters');
-    }
-
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  )
+  modifyOrder(@Body() body: ModifyOrderDto) {
     return this.ordersService.modifyOrder(body);
   }
 

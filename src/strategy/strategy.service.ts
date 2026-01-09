@@ -13,7 +13,7 @@ export class StrategyService {
     private readonly tradingViewSignalService: TradingViewSignalService,
   ) {}
 
-// to get data from webhook . pass it to trading view service also save it to database
+  // to get data from webhook . pass it to trading view service also save it to database
   async handleTradingViewWebhook(payload: TradingViewWebhookDto) {
     if (payload.secret !== this.TRADINGVIEW_SECRET) {
       throw new UnauthorizedException('Invalid TradingView secret');
@@ -41,10 +41,9 @@ export class StrategyService {
   onTick(tickData: any): void {
     // Raw tick logging
     //this.logger.log(`Tick Received: ${JSON.stringify(tickData)}`);
-    tickData.lp > 0 || tickData.bp1 > 0 || tickData.sp1 > 0
-      ? console.log('tick data : ', tickData)
-      : '';
-
+    // tickData.lp > 0 || tickData.bp1 > 0 || tickData.sp1 > 0
+    //   ? console.log('tick data : ', tickData)
+    //   : '';
     // Later you can route to strategies:
     // this.runScalpingStrategy(tickData);
     // this.runVWAPStrategy(tickData);
