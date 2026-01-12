@@ -10,11 +10,19 @@ export class TradingViewController {
   @Post('webhook')
   @HttpCode(200)
   receiveTradingViewWebhook(@Body() payload: TradingViewWebhookDto) {
-    this.strategyService.handleTradingViewWebhook(payload);
+    console.log('webhook url controller called ');
+    //console.log('data received for tv signal (controller):  ', payload);
+    try {
+      
+      this.strategyService.handleTradingViewWebhook(payload);
+      return {
+        status: 'ok',
+        message: 'TradingView webhook processed',
+      };
+    } catch (error) {
+      
+    }
+    
 
-    return {
-      status: 'ok',
-      message: 'TradingView webhook processed',
-    };
   }
 }

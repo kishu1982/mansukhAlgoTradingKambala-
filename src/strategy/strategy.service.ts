@@ -1,4 +1,9 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { TradingViewStrategy } from './strategies/tradingview.strategy';
 import { TradingViewWebhookDto } from './dto/tradingview-webhook.dto';
 import { TradingViewSignalService } from 'src/database/services/tradingview-signal.service';
@@ -16,7 +21,13 @@ export class StrategyService {
   // to get data from webhook . pass it to trading view service also save it to database
   async handleTradingViewWebhook(payload: TradingViewWebhookDto) {
     if (payload.secret !== this.TRADINGVIEW_SECRET) {
-      throw new UnauthorizedException('Invalid TradingView secret');
+      // throw new UnauthorizedException('Invalid TradingView secret');
+      this.logger.log('Invalid TradingView secret');
+      //throw new UnauthorizedException('invalid secret key recived from tradingview signal');
+      return {
+        success: false,
+        message: 'invalid secret key received from TradingView signal',
+      }; // Missing colon, inconsistent format
     }
 
     // 1️⃣ Save in DB (Database module)
@@ -30,7 +41,7 @@ export class StrategyService {
       strategy: payload.strategy,
       rawPayload: payload,
     });
-
+    // console.log('data recived for tv signal: ', payload);
     // 2️⃣ Run strategy logic
     this.tradingViewStrategy.execute(payload);
   }
@@ -40,11 +51,11 @@ export class StrategyService {
    */
   onTick(tickData: any): void {
     // Raw tick logging
-    this.logger.log(`Tick Received: ${JSON.stringify(tickData.lp)}`);
+    // this.logger.log(`Tick Received: ${JSON.stringify(tickData.lp)}`);
     //this.logger.log(`Tick Received: ${JSON.stringify(tickData)}`);
-    tickData.lp > 0 || tickData.bp1 > 0 || tickData.sp1 > 0
-      ? console.log('tick data : ', tickData)
-      : '';
+    // tickData.lp > 0 || tickData.bp1 > 0 || tickData.sp1 > 0
+    //   ? console.log('tick data : ', tickData.ltp)
+    //   : '';
     // Later you can route to strategies:
     // this.runScalpingStrategy(tickData);
     // this.runVWAPStrategy(tickData);

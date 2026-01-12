@@ -9,6 +9,9 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      transformOptions: {
+        enableImplicitConversion: true, // 🔴 REQUIRED
+      },
     }),
   );// defining gloabally 
   await app.listen(process.env.PORT ?? 3000);
