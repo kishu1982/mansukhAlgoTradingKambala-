@@ -42,6 +42,14 @@ export class TradingViewStrategy {
   ) {}
 
   // =====================================================
+  // 🔹 UTILS
+  // =====================================================
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // =====================================================
   // 🔹 NET POSITION HELPERS
   // =====================================================
 
@@ -62,7 +70,7 @@ export class TradingViewStrategy {
       }
 
       this.logger.log(
-        `📊 Net Position → ${position.symname} | Qty=${position.netqty}`,
+        `📊 Net Position → ${position.symname} | netQty=${position.netqty}`,
       );
 
       return position;
@@ -73,10 +81,12 @@ export class TradingViewStrategy {
   }
 
   private normalizeNetQty(position: any | null): number {
-    const qty = position ? Number(position.netqty) : 0;
+    if (!position) return 0;
+
+    const qty = Number(position.netqty);
 
     if (Number.isNaN(qty)) {
-      this.logger.error(`❌ Invalid netqty received: ${position?.netqty}`);
+      this.logger.error(`❌ Invalid netqty received: ${position.netqty}`);
       return 0;
     }
 
@@ -121,28 +131,54 @@ export class TradingViewStrategy {
     );
   }
 
+  // =====================================================
+  // 🔹 WAIT & CONFIRM POSITION CLOSE
+  // =====================================================
+
+  private async waitForPositionToClose(
+    token: string,
+    retries = 3,
+    delayMs = 1000,
+  ): Promise<boolean> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      await this.sleep(delayMs);
+
+      const position = await this.getNetPositionByToken(token);
+      const netQty = this.normalizeNetQty(position);
+
+      this.logger.log(`⏳ Recheck ${attempt}/${retries} → netQty=${netQty}`);
+
+      if (netQty === 0) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // =====================================================
+  // 🔹 CLOSE OPPOSITE POSITION (FULL QTY)
+  // =====================================================
+
   private async closeOppositePositionIfAny(
     netQty: number,
     payloadSide: 'BUY' | 'SELL',
     tradingSymbol: string,
     payload: TradingViewWebhookDto,
-  ): Promise<void> {
-    if (netQty === 0) return;
+  ): Promise<boolean> {
+    if (netQty === 0) return true;
 
-    const positionSide = netQty > 0 ? 'BUY' : 'SELL';
+    const positionSide: 'BUY' | 'SELL' = netQty > 0 ? 'BUY' : 'SELL';
 
-    // Same direction → nothing to close
     if (positionSide === payloadSide) {
       this.logger.log('ℹ️ Existing position is same side. No close required.');
-      return;
+      return true;
     }
 
     const closeQty = Math.abs(netQty);
-    const closeSide = positionSide === 'BUY' ? 'SELL' : 'BUY';
+    const closeSide: 'BUY' | 'SELL' = positionSide === 'BUY' ? 'SELL' : 'BUY';
 
-    this.logger.log(
-      `🔁 Closing opposite position | Side=${closeSide} | Qty=${closeQty}`,
-    );
+    this.logger.log(`🔁 Closing opposite position → ${closeSide} ${closeQty}`);
 
     await this.placeMarketOrder(
       closeSide,
@@ -151,6 +187,16 @@ export class TradingViewStrategy {
       tradingSymbol,
       'AUTO CLOSE OPPOSITE POSITION',
     );
+
+    const closed = await this.waitForPositionToClose(payload.token);
+
+    if (!closed) {
+      this.logger.warn('⚠️ Position not closed after retries, skipping entry');
+      return false;
+    }
+
+    this.logger.log('✅ Opposite position fully closed');
+    return true;
   }
 
   // =====================================================
@@ -181,40 +227,40 @@ export class TradingViewStrategy {
       }
 
       const tradingSymbol = securityInfo.tsym;
-
       this.logger.log(`✅ Security validated: ${tradingSymbol}`);
 
       // -------------------------------
-      // 2️⃣ POSITION CHECK (ALWAYS)
+      // 2️⃣ INITIAL POSITION CHECK
       // -------------------------------
       const position = await this.getNetPositionByToken(payload.token);
       const netQty = this.normalizeNetQty(position);
 
-      this.logger.log(
-        `🧠 Position Gate → token=${payload.token}, netQty=${netQty}`,
-      );
+      this.logger.log(`🧠 Initial Position Gate → netQty=${netQty}`);
 
       // -------------------------------
       // 3️⃣ CLOSE OPPOSITE POSITION
       // -------------------------------
-
-      await this.closeOppositePositionIfAny(
+      const canProceed = await this.closeOppositePositionIfAny(
         netQty,
         payload.side,
         tradingSymbol,
         payload,
       );
 
-      // 🔄 Re-fetch position after close (VERY IMPORTANT)
-      const updatedPosition = await this.getNetPositionByToken(payload.token);
-      const updatedNetQty = this.normalizeNetQty(updatedPosition);
-
-      this.logger.log(`🔄 Post-close position check → netQty=${updatedNetQty}`);
+      if (!canProceed) return;
 
       // -------------------------------
-      // 4️⃣ ENTRY LOGIC
+      // 4️⃣ FINAL CONFIRMATION
       // -------------------------------
-      if (updatedNetQty === 0) {
+      const finalPosition = await this.getNetPositionByToken(payload.token);
+      const finalNetQty = this.normalizeNetQty(finalPosition);
+
+      this.logger.log(`🔐 Final Position Gate → netQty=${finalNetQty}`);
+
+      // -------------------------------
+      // 5️⃣ ENTRY
+      // -------------------------------
+      if (finalNetQty === 0) {
         this.logger.log(`🚀 Fresh ${payload.side} entry allowed`);
 
         await this.placeMarketOrder(
@@ -225,9 +271,7 @@ export class TradingViewStrategy {
           'TV ENTRY',
         );
       } else {
-        this.logger.log(
-          '⛔ Position still exists after close attempt. Entry skipped.',
-        );
+        this.logger.log('⛔ Position still exists after close. Entry skipped.');
       }
 
       this.logger.log('✅ Strategy execution completed');
@@ -236,6 +280,7 @@ export class TradingViewStrategy {
     }
   }
 }
+
 
 /* 
 // old working code
