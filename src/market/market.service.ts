@@ -134,6 +134,43 @@ export class MarketService {
   //   }
   // }
 
+  // async getSecurityInfo(data: { exchange: string; token: string | number }) {
+  //   const tokenInfo = this.tokenService.getToken();
+  //   const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
+
+  //   const jData = {
+  //     uid: tokenInfo.UID,
+  //     exch: data.exchange,
+  //     token: String(data.token),
+  //   };
+
+  //   const payload = `jData=${JSON.stringify(jData)}`;
+
+  //   this.logger.debug(`📤 GetSecurityInfo → ${payload}`);
+
+  //   try {
+  //     const response = await axios.post(`${baseUrl}/GetSecurityInfo`, payload, {
+  //       headers: {
+  //         Authorization: `Bearer ${tokenInfo.Access_token}`,
+  //         'Content-Type': 'application/json', // matches working curl
+  //       },
+  //       transformRequest: [(d) => d],
+  //       timeout: 10000,
+  //     });
+
+  //     if (response.data?.stat === 'Not_Ok') {
+  //       throw new Error(response.data.emsg);
+  //     }
+
+  //     return response.data;
+  //   } catch (error) {
+  //     this.logger.error(
+  //       '❌ GetSecurityInfo failed',
+  //       error.response?.data || error.message,
+  //     );
+  //     throw error;
+  //   }
+  // }
   async getSecurityInfo(data: { exchange: string; token: string | number }) {
     const tokenInfo = this.tokenService.getToken();
     const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
@@ -152,23 +189,57 @@ export class MarketService {
       const response = await axios.post(`${baseUrl}/GetSecurityInfo`, payload, {
         headers: {
           Authorization: `Bearer ${tokenInfo.Access_token}`,
-          'Content-Type': 'application/json', // matches working curl
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
         transformRequest: [(d) => d],
         timeout: 10000,
       });
 
+      // ❗ Noren business error
       if (response.data?.stat === 'Not_Ok') {
-        throw new Error(response.data.emsg);
+        this.logger.warn(
+          `⚠️ GetSecurityInfo Noren error: ${response.data.emsg}`,
+        );
+        throw new BadRequestException(response.data.emsg);
       }
 
       return response.data;
-    } catch (error) {
+    } catch (err) {
+      // ✅ Axios error handling
+      if (err instanceof AxiosError) {
+        const status = err.response?.status;
+        const norenMsg =
+          err.response?.data?.emsg ||
+          err.response?.data?.message ||
+          err.message;
+
+        this.logger.error(
+          `❌ GetSecurityInfo Axios error`,
+          JSON.stringify({
+            status,
+            message: norenMsg,
+          }),
+        );
+
+        throw new BadRequestException(
+          norenMsg || 'Failed to fetch security info',
+        );
+      }
+
+      // ✅ Already a NestJS HTTP exception
+      if (err instanceof BadRequestException) {
+        throw err;
+      }
+
+      // ✅ Fallback (never leak raw error)
       this.logger.error(
-        '❌ GetSecurityInfo failed',
-        error.response?.data || error.message,
+        '❌ GetSecurityInfo unknown error',
+        err?.message || err,
       );
-      throw error;
+
+      throw new InternalServerErrorException(
+        'GetSecurityInfo failed unexpectedly',
+      );
     }
   }
 
@@ -623,12 +694,11 @@ export class MarketService {
         });
       }
 
-     // return response.data;
-     return {
-       symbol: jData.sym,
-       candles: this.normalizeEodData(response.data),
-     };
-
+      // return response.data;
+      return {
+        symbol: jData.sym,
+        candles: this.normalizeEodData(response.data),
+      };
     } catch (error) {
       if (error instanceof AxiosError) {
         this.logger.error(

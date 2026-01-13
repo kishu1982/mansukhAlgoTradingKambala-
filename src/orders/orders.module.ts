@@ -8,5 +8,6 @@ import { TokenService } from 'src/token/token.service';
   imports: [TokenModule],
   providers: [OrdersService, TokenService],
   controllers: [OrdersController],
+  exports: [OrdersService],
 })
 export class OrdersModule {}

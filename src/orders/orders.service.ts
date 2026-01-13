@@ -9,6 +9,7 @@ import { TokenService } from './../token/token.service';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { AxiosError } from 'axios';
+import { PlaceOrderDto } from './dto/place-order.dto';
 
 const NorenRestApi = require('norenrestapi/lib/restapi');
 
@@ -73,47 +74,144 @@ export class OrdersService {
 
   //   return response.data;
   // }
-  async placeOrder(order: {
-    buy_or_sell: 'B' | 'S';
-    product_type: 'C' | 'M' | 'H';
-    exchange: string;
-    tradingsymbol: string;
-    quantity: number;
-    price_type: 'LMT' | 'MKT' | 'SL-LMT' | 'SL-MKT';
-    price?: number;
-    trigger_price?: number;
-    retention?: string;
-    remarks?: string;
-  }) {
+  // async placeOrder(order: {
+  //   buy_or_sell: 'B' | 'S';
+  //   product_type: 'C' | 'M' | 'H';
+  //   exchange: string;
+  //   tradingsymbol: string;
+  //   quantity: number;
+  //   price_type: 'LMT' | 'MKT' | 'SL-LMT' | 'SL-MKT';
+  //   price?: number;
+  //   trigger_price?: number;
+  //   retention?: string;
+  //   remarks?: string;
+  // }) {
+  // async placeOrder(order: PlaceOrderDto) {
+  //   const token = this.tokenService.getToken();
+  //   const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
+
+  //   /* ---------------- VALIDATION (BLOCK BAD REQUESTS) ---------------- */
+
+  //   if (
+  //     (order.price_type === 'SL-LMT' || order.price_type === 'SL-MKT') &&
+  //     order.trigger_price === undefined
+  //   ) {
+  //     throw new BadRequestException(
+  //       'trigger_price is mandatory for stop loss orders',
+  //     );
+  //   }
+
+  //   if (
+  //     (order.price_type === 'LMT' || order.price_type === 'SL-LMT') &&
+  //     order.price === undefined
+  //   ) {
+  //     throw new BadRequestException('price is mandatory for limit orders');
+  //   }
+
+  //   /* ---------------- BUILD Noren PAYLOAD ---------------- */
+
+  //   const jData: any = {
+  //     uid: token.UID,
+  //     actid: token.Account_ID,
+  //     exch: order.exchange,
+  //     tsym: order.tradingsymbol,
+  //     qty: String(order.quantity),
+  //     prd: order.product_type,
+  //     trantype: order.buy_or_sell,
+  //     prctyp: order.price_type,
+  //     ret: order.retention ?? 'DAY',
+  //     remarks: order.remarks ?? '',
+  //     ordersource: 'API',
+  //   };
+
+  //   // Price (not required for MKT)
+  //   if (order.price_type !== 'MKT') {
+  //     jData.prc = String(order.price ?? 0);
+  //   }
+
+  //   // Trigger price for Stop Loss
+  //   if (order.price_type === 'SL-LMT' || order.price_type === 'SL-MKT') {
+  //     jData.trgprc = String(order.trigger_price);
+  //   }
+
+  //   const payload = `jData=${JSON.stringify(jData)}`;
+
+  //   this.logger.debug(`📤 PlaceOrder RAW → ${payload}`);
+
+  //   /* ---------------- API CALL ---------------- */
+
+  //   try {
+  //     const response = await axios.post(`${baseUrl}/PlaceOrder`, payload, {
+  //       headers: {
+  //         Authorization: `Bearer ${token.Access_token}`,
+  //         'Content-Type': 'application/x-www-form-urlencoded',
+  //       },
+  //       transformRequest: [(d) => d],
+  //       timeout: 10000,
+  //     });
+
+  //     /* ---------------- BROKER ERROR ---------------- */
+
+  //     if (response.data?.stat === 'Not_Ok') {
+  //       this.logger.warn(`❌ Noren Order Error → ${response.data.emsg}`);
+
+  //       throw new BadRequestException({
+  //         message: 'Order rejected by broker',
+  //         brokerError: response.data.emsg,
+  //       });
+  //     }
+
+  //     return response.data;
+  //   } catch (error) {
+  //     /* ---------------- AXIOS ERROR ---------------- */
+
+  //     if (error instanceof AxiosError) {
+  //       const brokerMsg =
+  //         error.response?.data?.emsg ||
+  //         error.response?.data?.message ||
+  //         error.message;
+
+  //       this.logger.error(`🚨 PlaceOrder Axios Error → ${brokerMsg}`);
+
+  //       throw new BadRequestException({
+  //         message: 'Failed to place order',
+  //         brokerError: brokerMsg,
+  //         statusCode: error.response?.status,
+  //       });
+  //     }
+
+  //     /* ---------------- UNKNOWN ERROR ---------------- */
+
+  //     this.logger.error('🔥 Unexpected PlaceOrder Error', error);
+
+  //     throw new InternalServerErrorException({
+  //       message: 'Unexpected error while placing order',
+  //     });
+  //   }
+  // }
+
+  async placeOrder(order: PlaceOrderDto) {
     const token = this.tokenService.getToken();
     const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
 
-    /* ---------------- VALIDATION (BLOCK BAD REQUESTS) ---------------- */
+    /* ---------------- SANITIZE ---------------- */
 
-    if (
-      (order.price_type === 'SL-LMT' || order.price_type === 'SL-MKT') &&
-      order.trigger_price === undefined
-    ) {
-      throw new BadRequestException(
-        'trigger_price is mandatory for stop loss orders',
-      );
+    const exchange = order.exchange?.trim();
+    const tradingsymbol = order.tradingsymbol?.trim();
+
+    if (!exchange || !tradingsymbol) {
+      throw new BadRequestException('Exchange or Trading Symbol missing');
     }
 
-    if (
-      (order.price_type === 'LMT' || order.price_type === 'SL-LMT') &&
-      order.price === undefined
-    ) {
-      throw new BadRequestException('price is mandatory for limit orders');
-    }
-
-    /* ---------------- BUILD Noren PAYLOAD ---------------- */
+    /* ---------------- BASE PAYLOAD ---------------- */
 
     const jData: any = {
-      uid: token.UID,
-      actid: token.Account_ID,
-      exch: order.exchange,
-      tsym: order.tradingsymbol,
-      qty: String(order.quantity),
+      uid: String(token.UID),
+      actid: String(token.Account_ID),
+      exch: exchange,
+      tsym: tradingsymbol,
+      qty: String(Math.floor(order.quantity)),
+      prc: '0.0', // ✅ REQUIRED EVEN FOR MKT
       prd: order.product_type,
       trantype: order.buy_or_sell,
       prctyp: order.price_type,
@@ -122,37 +220,45 @@ export class OrdersService {
       ordersource: 'API',
     };
 
-    // Price (not required for MKT)
-    if (order.price_type !== 'MKT') {
-      jData.prc = String(order.price ?? 0);
+    /* ---------------- ORDER TYPE RULES ---------------- */
+
+    if (order.price_type === 'LMT' || order.price_type === 'SL-LMT') {
+      if (order.price === undefined) {
+        throw new BadRequestException('Price required for LMT / SL-LMT');
+      }
+      jData.prc = String(order.price);
     }
 
-    // Trigger price for Stop Loss
-    if (order.price_type === 'SL-LMT' || order.price_type === 'SL-MKT') {
+    if (order.price_type === 'SL-MKT' || order.price_type === 'SL-LMT') {
+      if (order.trigger_price === undefined) {
+        throw new BadRequestException('Trigger price required for SL order');
+      }
       jData.trgprc = String(order.trigger_price);
     }
 
+    /* ---------------- FINAL PAYLOAD (THIS IS KEY) ---------------- */
+
     const payload = `jData=${JSON.stringify(jData)}`;
 
-    this.logger.debug(`📤 PlaceOrder RAW → ${payload}`);
+    this.logger.debug(`📤 FINAL RAW PAYLOAD → ${payload}`);
 
     /* ---------------- API CALL ---------------- */
 
     try {
-      const response = await axios.post(`${baseUrl}/PlaceOrder`, payload, {
-        headers: {
-          Authorization: `Bearer ${token.Access_token}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
+      const response = await axios.post(
+        `${baseUrl}/PlaceOrder`,
+        payload, // ✅ RAW STRING
+        {
+          headers: {
+            Authorization: `Bearer ${token.Access_token}`,
+            'Content-Type': 'application/json', // ✅ SAME AS CURL
+          },
+          transformRequest: [(d) => d], // 🚨 REQUIRED
+          timeout: 10000,
         },
-        transformRequest: [(d) => d],
-        timeout: 10000,
-      });
-
-      /* ---------------- BROKER ERROR ---------------- */
+      );
 
       if (response.data?.stat === 'Not_Ok') {
-        this.logger.warn(`❌ Noren Order Error → ${response.data.emsg}`);
-
         throw new BadRequestException({
           message: 'Order rejected by broker',
           brokerError: response.data.emsg,
@@ -161,30 +267,20 @@ export class OrdersService {
 
       return response.data;
     } catch (error) {
-      /* ---------------- AXIOS ERROR ---------------- */
-
       if (error instanceof AxiosError) {
-        const brokerMsg =
-          error.response?.data?.emsg ||
-          error.response?.data?.message ||
-          error.message;
-
-        this.logger.error(`🚨 PlaceOrder Axios Error → ${brokerMsg}`);
-
         throw new BadRequestException({
           message: 'Failed to place order',
-          brokerError: brokerMsg,
+          brokerError:
+            error.response?.data?.emsg ||
+            error.response?.data?.message ||
+            error.message,
           statusCode: error.response?.status,
         });
       }
 
-      /* ---------------- UNKNOWN ERROR ---------------- */
-
-      this.logger.error('🔥 Unexpected PlaceOrder Error', error);
-
-      throw new InternalServerErrorException({
-        message: 'Unexpected error while placing order',
-      });
+      throw new InternalServerErrorException(
+        'Unexpected error while placing order',
+      );
     }
   }
 
@@ -904,11 +1000,13 @@ export class OrdersService {
   /* ========================= NET POSITIONS ========================= */
 
   async getNetPositions() {
+    let api: any;
+
     try {
       const token = this.tokenService.getToken();
 
-      // ✅ Create SDK instance with saved token details
-      const api = new NorenRestApi({
+      // ✅ SDK init (can throw synchronously)
+      api = new NorenRestApi({
         Access_token: token.Access_token,
         UID: token.UID,
         AID: token.Account_ID,
@@ -918,28 +1016,43 @@ export class OrdersService {
 
       const response = await api.get_positions();
 
-      // ❌ Logical error from Noren
+      // ❗ Noren logical error
       if (response?.stat === 'Not_Ok') {
-        throw new BadRequestException({
-          message: 'Failed to fetch net positions',
-          error: response.emsg,
-          raw: response,
-        });
+        this.logger.warn(`⚠️ Noren get_positions error: ${response.emsg}`);
+
+        throw new BadRequestException(
+          response.emsg || 'Failed to fetch net positions',
+        );
       }
 
       return {
         success: true,
         data: response,
       };
-    } catch (error) {
-      this.logger.error('❌ SDK get_positions failed', error.message || error);
+    } catch (err) {
+      // 🔒 NEVER assume err is Error
+      const safeMessage =
+        typeof err === 'string'
+          ? err
+          : err?.message
+            ? err.message
+            : 'Unknown SDK error';
 
-      if (error instanceof BadRequestException) {
-        throw error;
+      this.logger.error(
+        '❌ SDK get_positions failed',
+        JSON.stringify({
+          message: safeMessage,
+        }),
+      );
+
+      // ✅ Already handled HTTP error
+      if (err instanceof BadRequestException) {
+        throw err;
       }
 
+      // ✅ SDK / runtime error
       throw new InternalServerErrorException(
-        'Unexpected error while fetching net positions',
+        safeMessage || 'Unexpected error while fetching net positions',
       );
     }
   }

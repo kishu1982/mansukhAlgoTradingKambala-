@@ -1,16 +1,25 @@
-import { IsString, IsOptional, IsNumber, IsIn } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsIn,
+  IsNotEmpty,
+} from 'class-validator';
 
 export class TradingViewWebhookDto {
+  @IsNotEmpty({ message: 'Exchange Code is required (NSE/NFO/MCX/BSE)' })
   @IsString()
   exchange: string;
 
+  @IsNotEmpty({ message: 'Symbol name is required (e.g RELIANCE / NIFTY)' })
   @IsString()
   symbol: string;
 
-  @IsOptional()
+  @IsNotEmpty({ message: 'Token number is required' })
   @IsString()
-  token?: string;
+  token: string;
 
+  @IsNotEmpty({ message: 'Side to trade is required ( `BUY`,`SELL`)' })
   @IsIn(['BUY', 'SELL'])
   side: 'BUY' | 'SELL';
 
@@ -26,7 +35,7 @@ export class TradingViewWebhookDto {
   @IsString()
   interval?: string;
 
-  @IsOptional()
+  @IsNotEmpty({ message: 'Strategy name is required' })
   @IsString()
   strategy?: string;
 

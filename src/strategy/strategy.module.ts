@@ -3,9 +3,11 @@ import { StrategyService } from './strategy.service';
 import { TradingViewController } from './controllers/tradingview.controller';
 import { TradingViewStrategy } from './strategies/tradingview.strategy';
 import { DatabaseModule } from 'src/database/database.module';
+import { MarketModule } from 'src/market/market.module';
+import { OrdersModule } from 'src/orders/orders.module';
 
 @Module({
-  imports:[DatabaseModule],
+  imports:[DatabaseModule,MarketModule,OrdersModule],
   controllers: [TradingViewController],
   providers: [StrategyService,  TradingViewStrategy] ,// 🔴 REQUIRED],
   exports: [StrategyService], // 👈 IMPORTANT (used by WebSocket module)

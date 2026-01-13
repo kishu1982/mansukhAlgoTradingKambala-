@@ -6,5 +6,6 @@ import { TokenService } from 'src/token/token.service';
 @Module({
   providers: [MarketService, TokenService],
   controllers: [MarketController],
+  exports: [MarketService],
 })
 export class MarketModule {}

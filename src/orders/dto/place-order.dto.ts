@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   IsEnum,
   IsNotEmpty,
@@ -23,6 +24,7 @@ export class PlaceOrderDto {
   @IsNotEmpty()
   tradingsymbol: string;
 
+  @Type(() => Number)
   @IsNumber()
   @IsPositive()
   quantity: number;
@@ -33,13 +35,14 @@ export class PlaceOrderDto {
   /* ---------- PRICE ---------- */
 
   @ValidateIf((o) => o.price_type === 'LMT' || o.price_type === 'SL-LMT')
+  @Type(() => Number)
   @IsNumber()
   @IsPositive()
   price?: number;
 
   /* ---------- TRIGGER PRICE ---------- */
-
   @ValidateIf((o) => o.price_type === 'SL-LMT' || o.price_type === 'SL-MKT')
+  @Type(() => Number)
   @IsNumber()
   @IsPositive()
   trigger_price?: number;

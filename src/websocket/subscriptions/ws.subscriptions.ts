@@ -2,7 +2,7 @@
 
 export const WS_SUBSCRIPTIONS = {
   DEFAULT: [
-    'NSE|22', // RELIANCE
+    'NSE|2885', // RELIANCE
     'NSE|1594', // INFY
     'NFO|35003', // NIFTY FUT
     'MCX|472780', // GOLDM

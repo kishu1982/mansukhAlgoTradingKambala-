@@ -1,4 +1,11 @@
-import { Controller, Post, Body, BadRequestException, UsePipes, ValidationPipe } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  BadRequestException,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { PlaceOrderDto } from './dto/place-order.dto';
 import { ModifyOrderDto } from './dto/modify-order.dto';
@@ -10,9 +17,9 @@ export class OrdersController {
   @Post('place')
   @UsePipes(
     new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
       transform: true,
+      skipMissingProperties: true,
+      forbidUnknownValues: false,
     }),
   )
   placeOrder(@Body() body: PlaceOrderDto) {
