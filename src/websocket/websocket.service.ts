@@ -97,9 +97,9 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
           //     tick.lp
           //   } | Time: ${tick.ft || ''}`,
           // );
-          // tick.lp > 0 || tick.bp1 > 0 || tick.sp1 > 0
-          //   ? console.log('tick data : ', tick)
-          //   : '';
+          tick.lp > 0 || tick.bp1 > 0 || tick.sp1 > 0
+            ? console.log('tick data : ', tick)
+            : '';
         },
 
         // 📦 ORDER UPDATES (optional)
