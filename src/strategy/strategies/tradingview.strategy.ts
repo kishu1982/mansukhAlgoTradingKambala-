@@ -94,6 +94,21 @@ export class TradingViewStrategy {
   }
 
   // =====================================================
+  // 🔹 Add a helper to resolve trade quantity
+  // =====================================================
+  private resolveTradeQuantity(payload: TradingViewWebhookDto): number {
+    const vol = Number(payload.volume);
+
+    if (payload.volume !== undefined && Number.isFinite(vol) && vol > 0) {
+      this.logger.log(`📦 Using webhook volume: ${vol}`);
+      return Math.floor(vol);
+    }
+
+    this.logger.log(`📦 Using default tradeVolume: ${this.tradeVolume}`);
+    return this.tradeVolume;
+  }
+
+  // =====================================================
   // 🔹 ORDER HELPERS
   // =====================================================
 
@@ -261,11 +276,15 @@ export class TradingViewStrategy {
       // 5️⃣ ENTRY
       // -------------------------------
       if (finalNetQty === 0) {
-        this.logger.log(`🚀 Fresh ${payload.side} entry allowed`);
+        const entryQty = this.resolveTradeQuantity(payload);
+
+        this.logger.log(
+          `🚀 Fresh ${payload.side} entry allowed | Qty=${entryQty}`,
+        );
 
         await this.placeMarketOrder(
           payload.side,
-          this.tradeVolume,
+          entryQty,
           payload,
           tradingSymbol,
           'TV ENTRY',

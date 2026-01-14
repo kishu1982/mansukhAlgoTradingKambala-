@@ -10,9 +10,21 @@ import { TokenModule } from './token/token.module';
 import { WebsocketModule } from './websocket/websocket.module';
 import { DatabaseModule } from './database/database.module';
 import { StrategyModule } from './strategy/strategy.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
-  imports: [AuthModule, NorenModule, OrdersModule, MarketModule, ConfigModule.forRoot({ isGlobal: true }), TokenModule, WebsocketModule, DatabaseModule, StrategyModule],
+  imports: [
+    AuthModule,
+    NorenModule,
+    OrdersModule,
+    MarketModule,
+    ConfigModule.forRoot({ isGlobal: true }),
+    TokenModule,
+    WebsocketModule,
+    DatabaseModule,
+    StrategyModule,
+    ScheduleModule.forRoot(), // ✅ REQUIRED
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

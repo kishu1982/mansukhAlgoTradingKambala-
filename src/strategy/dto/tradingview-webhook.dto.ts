@@ -7,25 +7,29 @@ import {
 } from 'class-validator';
 
 export class TradingViewWebhookDto {
-  @IsNotEmpty({ message: 'Exchange Code is required (NSE/NFO/MCX/BSE)' })
+  @IsNotEmpty()
   @IsString()
   exchange: string;
 
-  @IsNotEmpty({ message: 'Symbol name is required (e.g RELIANCE / NIFTY)' })
+  @IsNotEmpty()
   @IsString()
   symbol: string;
 
-  @IsNotEmpty({ message: 'Token number is required' })
+  @IsNotEmpty()
   @IsString()
   token: string;
 
-  @IsNotEmpty({ message: 'Side to trade is required ( `BUY`,`SELL`)' })
+  @IsNotEmpty()
   @IsIn(['BUY', 'SELL'])
   side: 'BUY' | 'SELL';
 
   @IsOptional()
   @IsNumber()
   price?: number;
+
+  @IsOptional()
+  @IsNumber()
+  volume?: number; // ✅ NEW
 
   @IsOptional()
   @IsString()
@@ -35,7 +39,7 @@ export class TradingViewWebhookDto {
   @IsString()
   interval?: string;
 
-  @IsNotEmpty({ message: 'Strategy name is required' })
+  @IsNotEmpty()
   @IsString()
   strategy?: string;
 
