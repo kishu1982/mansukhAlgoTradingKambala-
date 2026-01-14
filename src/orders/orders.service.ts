@@ -999,13 +999,70 @@ export class OrdersService {
 
   /* ========================= NET POSITIONS ========================= */
 
+  // async getNetPositions() {
+  //   let api: any;
+
+  //   try {
+  //     const token = this.tokenService.getToken();
+
+  //     // ✅ SDK init (can throw synchronously)
+  //     api = new NorenRestApi({
+  //       Access_token: token.Access_token,
+  //       UID: token.UID,
+  //       AID: token.Account_ID,
+  //     });
+
+  //     this.logger.debug('📤 SDK get_positions called');
+
+  //     const response = await api.get_positions();
+  //     console.log(`response from getNetpostiions: `, response);
+
+  //     // ❗ Noren logical error
+  //     if (response?.stat === 'Not_Ok') {
+  //       this.logger.warn(`⚠️ Noren get_positions error: ${response.emsg}`);
+
+  //       throw new BadRequestException(
+  //         response.emsg || 'Failed to fetch net positions',
+  //       );
+  //     }
+
+  //     return {
+  //       success: true,
+  //       data: response,
+  //     };
+  //   } catch (err) {
+  //     // 🔒 NEVER assume err is Error
+  //     const safeMessage =
+  //       typeof err === 'string'
+  //         ? err
+  //         : err?.message
+  //           ? err.message
+  //           : 'Unknown SDK error';
+
+  //     this.logger.error(
+  //       '❌ SDK get_positions failed',
+  //       JSON.stringify({
+  //         message: safeMessage,
+  //       }),
+  //     );
+
+  //     // ✅ Already handled HTTP error
+  //     if (err instanceof BadRequestException) {
+  //       throw err;
+  //     }
+
+  //     // ✅ SDK / runtime error
+  //     throw new InternalServerErrorException(
+  //       safeMessage || 'Unexpected error while fetching net positions',
+  //     );
+  //   }
+  // }
   async getNetPositions() {
     let api: any;
 
     try {
       const token = this.tokenService.getToken();
 
-      // ✅ SDK init (can throw synchronously)
       api = new NorenRestApi({
         Access_token: token.Access_token,
         UID: token.UID,
@@ -1016,44 +1073,53 @@ export class OrdersService {
 
       const response = await api.get_positions();
 
-      // ❗ Noren logical error
-      if (response?.stat === 'Not_Ok') {
-        this.logger.warn(`⚠️ Noren get_positions error: ${response.emsg}`);
+      this.logger.debug(
+        `📥 get_positions response: ${JSON.stringify(response)}`,
+      );
 
-        throw new BadRequestException(
-          response.emsg || 'Failed to fetch net positions',
-        );
+      // ✅ Noren "no data" is NOT an error
+      if (
+        response?.stat === 'Not_Ok' &&
+        typeof response?.emsg === 'string' &&
+        response.emsg.toLowerCase().includes('no data')
+      ) {
+        this.logger.warn('ℹ️ No net positions found (no trades yet)');
+
+        return {
+          success: true,
+          data: [], // ✅ IMPORTANT
+        };
       }
 
+      // ❗ Real Noren error
+      if (response?.stat === 'Not_Ok') {
+        this.logger.error(`❌ Noren get_positions error: ${response.emsg}`);
+
+        return {
+          success: false,
+          data: [],
+          error: response.emsg || 'Failed to fetch net positions',
+        };
+      }
+
+      // ✅ Success
       return {
         success: true,
         data: response,
       };
     } catch (err) {
-      // 🔒 NEVER assume err is Error
+      // 🔒 Never crash app for strategy usage
       const safeMessage =
-        typeof err === 'string'
-          ? err
-          : err?.message
-            ? err.message
-            : 'Unknown SDK error';
+        typeof err === 'string' ? err : err?.message || 'Unknown SDK error';
 
-      this.logger.error(
-        '❌ SDK get_positions failed',
-        JSON.stringify({
-          message: safeMessage,
-        }),
-      );
+      this.logger.error('❌ SDK get_positions exception', safeMessage);
 
-      // ✅ Already handled HTTP error
-      if (err instanceof BadRequestException) {
-        throw err;
-      }
-
-      // ✅ SDK / runtime error
-      throw new InternalServerErrorException(
-        safeMessage || 'Unexpected error while fetching net positions',
-      );
+      // ✅ Return safe empty response
+      return {
+        success: false,
+        data: [],
+        error: safeMessage,
+      };
     }
   }
 }
