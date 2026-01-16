@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
@@ -11,6 +11,7 @@ import { WebsocketModule } from './websocket/websocket.module';
 import { DatabaseModule } from './database/database.module';
 import { StrategyModule } from './strategy/strategy.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { RequestLoggerMiddleware } from './common/middleware/logger/request-logger.middleware';
 
 @Module({
   imports: [
@@ -28,4 +29,8 @@ import { ScheduleModule } from '@nestjs/schedule';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule  implements NestModule{
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestLoggerMiddleware).forRoutes('*'); // applies to all routes
+  }
+}
