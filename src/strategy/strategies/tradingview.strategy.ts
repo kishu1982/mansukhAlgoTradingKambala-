@@ -181,14 +181,16 @@ export class TradingViewStrategy {
     payloadSide: 'BUY' | 'SELL',
     tradingSymbol: string,
     payload: TradingViewWebhookDto,
-  ): Promise<boolean> {
-    if (netQty === 0) return true;
+  ): Promise<{ closedOpposite: boolean }> {
+    if (netQty === 0) {
+      return { closedOpposite: false };
+    }
 
     const positionSide: 'BUY' | 'SELL' = netQty > 0 ? 'BUY' : 'SELL';
 
     if (positionSide === payloadSide) {
       this.logger.log('ℹ️ Existing position is same side. No close required.');
-      return true;
+      return { closedOpposite: false };
     }
 
     const closeQty = Math.abs(netQty);
@@ -204,15 +206,12 @@ export class TradingViewStrategy {
       'AUTO CLOSE OPPOSITE POSITION',
     );
 
-    const closed = await this.waitForPositionToClose(payload.token);
+    await this.waitForPositionToClose(payload.token);
 
-    if (!closed) {
-      this.logger.warn('⚠️ Position not closed after retries, skipping entry');
-      return false;
-    }
+    this.logger.log('✅ Opposite position close initiated');
 
-    this.logger.log('✅ Opposite position fully closed');
-    return true;
+    return { closedOpposite: true };
+
   }
 
   // =====================================================
@@ -256,14 +255,13 @@ export class TradingViewStrategy {
       // -------------------------------
       // 3️⃣ CLOSE OPPOSITE POSITION
       // -------------------------------
-      const canProceed = await this.closeOppositePositionIfAny(
-        netQty,
-        payload.side,
-        tradingSymbol,
-        payload,
-      );
+     const result = await this.closeOppositePositionIfAny(
+       netQty,
+       payload.side,
+       tradingSymbol,
+       payload,
+     );
 
-      if (!canProceed) return;
 
       // -------------------------------
       // 4️⃣ FINAL CONFIRMATION
@@ -276,12 +274,47 @@ export class TradingViewStrategy {
       // -------------------------------
       // 5️⃣ ENTRY
       // -------------------------------
-      if (finalNetQty === 0) {
-        const entryQty = this.resolveTradeQuantity(payload);
+      // if (finalNetQty === 0) {
+      //   const entryQty = this.resolveTradeQuantity(payload);
 
+      //   this.logger.log(
+      //     `🚀 Fresh ${payload.side} entry allowed | Qty=${entryQty}`,
+      //   );
+
+      //   await this.placeMarketOrder(
+      //     payload.side,
+      //     entryQty,
+      //     payload,
+      //     tradingSymbol,
+      //     'TV ENTRY',
+      //   );
+      // } else {
+      //   this.logger.log('⛔ Position still exists after close. Entry skipped.');
+      // }
+      // -------------------------------
+      // 5️⃣ ENTRY (FORCED & SAFE)
+      // -------------------------------
+      const entryQty = this.resolveTradeQuantity(payload);
+
+      // If opposite position was closed → ALWAYS enter
+      if (result.closedOpposite) {
         this.logger.log(
-          `🚀 Fresh ${payload.side} entry allowed | Qty=${entryQty}`,
+          `🚀 Forced ${payload.side} entry after opposite close | Qty=${entryQty}`,
         );
+
+        await this.placeMarketOrder(
+          payload.side,
+          entryQty,
+          payload,
+          tradingSymbol,
+          'TV ENTRY AFTER CLOSE',
+        );
+        return;
+      }
+
+      // If no position exists → normal entry
+      if (finalNetQty === 0) {
+        this.logger.log(`🚀 Fresh ${payload.side} entry | Qty=${entryQty}`);
 
         await this.placeMarketOrder(
           payload.side,
@@ -291,7 +324,7 @@ export class TradingViewStrategy {
           'TV ENTRY',
         );
       } else {
-        this.logger.log('⛔ Position still exists after close. Entry skipped.');
+        this.logger.log('ℹ️ Position already exists. Entry skipped.');
       }
 
       this.logger.log('✅ Strategy execution completed');
