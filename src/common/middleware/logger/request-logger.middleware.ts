@@ -10,7 +10,7 @@ export class RequestLoggerMiddleware implements NestMiddleware {
   private readonly logDir = path.join(process.cwd(), 'data', 'loggerFile');
   private readonly logFile = path.join(
     this.logDir,
-    `requests-${new Date().toISOString().slice(0, 10)}.log`, // daily file
+    `requests-${new Date().toISOString().slice(0, 10)}.log`,
   );
 
   constructor() {
@@ -26,8 +26,16 @@ export class RequestLoggerMiddleware implements NestMiddleware {
     if (sanitizedBody?.password) sanitizedBody.password = '***masked***';
     if (sanitizedBody?.token) sanitizedBody.token = '***masked***';
 
+    // 🔹 IP address extraction
+    const clientIp =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      req.ip ||
+      req.socket?.remoteAddress ||
+      undefined;
+
     const logData = {
       timestamp: new Date().toISOString(),
+      ip: clientIp,
       method: req.method,
       url: req.originalUrl,
       params: req.params,
@@ -43,7 +51,7 @@ export class RequestLoggerMiddleware implements NestMiddleware {
 
     const logLine = JSON.stringify(logData) + '\n';
 
-    // 🔹 Write to file (append mode)
+    // 🔹 Write to file
     fs.appendFile(this.logFile, logLine, (err) => {
       if (err) {
         this.logger.error('Failed to write request log file', err);
