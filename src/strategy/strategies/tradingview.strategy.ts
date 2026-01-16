@@ -34,6 +34,16 @@ import { OrdersService } from 'src/orders/orders.service';
 export class TradingViewStrategy {
   private readonly logger = new Logger(TradingViewStrategy.name);
   private readonly tradeVolume = 1;
+  // =====================================================
+  // 🔹 TRADING TIME CONFIG (IST)
+  // =====================================================
+  private readonly MARKET_CUTOFF_TIME = '15:25'; // HH:mm (IST)
+  private readonly TIME_RESTRICTED_EXCHANGES = new Set([
+    'NSE',
+    'NFO',
+    'BSE',
+    'BFO',
+  ]);
 
   constructor(
     private readonly marketService: MarketService,
@@ -45,6 +55,26 @@ export class TradingViewStrategy {
   // =====================================================
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // =====================================================
+  // 🔹 Add IST time helper
+  // =====================================================
+  private isAfterMarketCutoff(): boolean {
+    const now = new Date();
+
+    // Convert to IST
+    const istTime = new Date(
+      now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }),
+    );
+
+    const [cutoffHour, cutoffMinute] =
+      this.MARKET_CUTOFF_TIME.split(':').map(Number);
+
+    const cutoff = new Date(istTime);
+    cutoff.setHours(cutoffHour, cutoffMinute, 0, 0);
+
+    return istTime >= cutoff;
   }
 
   // =====================================================
@@ -190,6 +220,19 @@ export class TradingViewStrategy {
   // =====================================================
   async execute(payload: TradingViewWebhookDto): Promise<void> {
     this.logger.log(`📩 Signal → ${JSON.stringify(payload)}`);
+
+    // =====================================================
+    // 🔒 MARKET TIME GUARD (IST)
+    // =====================================================
+    if (
+      this.TIME_RESTRICTED_EXCHANGES.has(payload.exchange) &&
+      this.isAfterMarketCutoff()
+    ) {
+      this.logger.warn(
+        `⏰ Trading time over for ${payload.exchange}. Cutoff=${this.MARKET_CUTOFF_TIME} IST. No new trades allowed.`,
+      );
+      return;
+    }
 
     try {
       const security = await this.marketService.getSecurityInfo({
