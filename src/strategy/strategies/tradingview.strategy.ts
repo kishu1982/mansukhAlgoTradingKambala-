@@ -300,7 +300,6 @@ export class TradingViewStrategy {
   }
 }
 
-
 /* 
 // old working code
 import {
