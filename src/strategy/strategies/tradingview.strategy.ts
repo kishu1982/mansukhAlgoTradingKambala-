@@ -61,19 +61,26 @@ export class TradingViewStrategy {
       return { netQty: 0, positions: [] };
     }
 
-    const matched = netPositions.data.filter(
+    // 🔥 Aggregate EVERYTHING for same token + exchange
+    const matchedPositions = netPositions.data.filter(
       (p) => p.token === token && p.exch === exchange,
     );
 
-    const netQty = matched.reduce((sum, p) => sum + Number(p.netqty || 0), 0);
-
-    this.logger.log(
-      `📊 Net Position → token=${token} | netQty=${netQty} | breakdown=${matched
-        .map((p) => `${p.prd}:${p.netqty}`)
-        .join(', ')}`,
+    const netQty = matchedPositions.reduce(
+      (sum, p) => sum + Number(p.netqty || 0),
+      0,
     );
 
-    return { netQty, positions: matched };
+    this.logger.log(
+      `📊 Net Position (Aggregated) → ${exchange}:${token} | netQty=${netQty} | rows=${matchedPositions.length}`,
+    );
+
+    // Optional detailed debug
+    matchedPositions.forEach((p) => {
+      this.logger.debug(`   ↳ prd=${p.prd ?? 'NA'} | netqty=${p.netqty}`);
+    });
+
+    return { netQty, positions: matchedPositions };
   }
 
   // =====================================================
