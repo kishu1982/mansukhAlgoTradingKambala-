@@ -14,7 +14,6 @@ export class RequestLoggerMiddleware implements NestMiddleware {
   );
 
   constructor() {
-    // Ensure directory exists
     if (!fs.existsSync(this.logDir)) {
       fs.mkdirSync(this.logDir, { recursive: true });
     }
@@ -24,17 +23,24 @@ export class RequestLoggerMiddleware implements NestMiddleware {
     const sanitizedBody = { ...req.body };
 
     if (sanitizedBody?.password) sanitizedBody.password = '***masked***';
-    if (sanitizedBody?.token) sanitizedBody.token = '***masked***';
+    // if (sanitizedBody?.token) sanitizedBody.token = '***masked***';
 
-    // 🔹 IP address extraction
     const clientIp =
       (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
       req.ip ||
       req.socket?.remoteAddress ||
       undefined;
 
+    // 🔹 Timestamps
+    const utcTimestamp = new Date().toISOString();
+    const istTimestamp = new Date().toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour12: false,
+    });
+
     const logData = {
-      timestamp: new Date().toISOString(),
+      timestamp: utcTimestamp, // UTC
+      ISTtimeStamp: istTimestamp, // India time
       ip: clientIp,
       method: req.method,
       url: req.originalUrl,
@@ -51,14 +57,12 @@ export class RequestLoggerMiddleware implements NestMiddleware {
 
     const logLine = JSON.stringify(logData) + '\n';
 
-    // 🔹 Write to file
     fs.appendFile(this.logFile, logLine, (err) => {
       if (err) {
         this.logger.error('Failed to write request log file', err);
       }
     });
 
-    // 🔹 Optional console log
     this.logger.log(logLine.trim());
 
     next(); // VERY IMPORTANT
