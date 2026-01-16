@@ -128,7 +128,8 @@ export class TradingViewStrategy {
 
     const orderId = await this.orderService.placeOrder({
       buy_or_sell: buyOrSell,
-      product_type: 'C',
+      //product_type: 'C', // delivery
+      product_type: 'I', // intraday
       exchange: payload.exchange,
       tradingsymbol: tradingSymbol,
       quantity,

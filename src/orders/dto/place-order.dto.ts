@@ -14,7 +14,7 @@ export class PlaceOrderDto {
   buy_or_sell: 'B' | 'S';
 
   @IsEnum(['C', 'M', 'H'])
-  product_type: 'C' | 'M' | 'H';
+  product_type: 'C' | 'M' | 'H' | 'I';
 
   @IsString()
   @IsNotEmpty()
