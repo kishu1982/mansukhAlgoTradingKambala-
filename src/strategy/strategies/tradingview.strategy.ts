@@ -25,7 +25,6 @@ If netQty == 0 → place new entry
 Log & exit
 
 */
-
 import { Injectable, Logger } from '@nestjs/common';
 import { TradingViewWebhookDto } from '../dto/tradingview-webhook.dto';
 import { MarketService } from './../../market/market.service';
@@ -44,62 +43,46 @@ export class TradingViewStrategy {
   // =====================================================
   // 🔹 UTILS
   // =====================================================
-
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // =====================================================
-  // 🔹 NET POSITION HELPERS
+  // 🔹 NET POSITION (AGGREGATED)
   // =====================================================
+  private async getAggregatedNetPosition(
+    token: string,
+    exchange: string,
+  ): Promise<{ netQty: number; positions: any[] }> {
+    const netPositions = await this.orderService.getNetPositions();
 
-  private async getNetPositionByToken(token: string): Promise<any | null> {
-    try {
-      const netPositions = await this.orderService.getNetPositions();
-
-      if (!netPositions?.data || !Array.isArray(netPositions.data)) {
-        this.logger.warn('⚠️ Net positions unavailable or empty');
-        return null;
-      }
-
-      const position = netPositions.data.find((p) => p.token === token) || null;
-
-      if (!position) {
-        this.logger.log(`ℹ️ No open position for token ${token}`);
-        return null;
-      }
-
-      this.logger.log(
-        `📊 Net Position → ${position.symname} | netQty=${position.netqty}`,
-      );
-
-      return position;
-    } catch (err) {
-      this.logger.error('❌ getNetPositions failed', err?.message || err);
-      return null;
-    }
-  }
-
-  private normalizeNetQty(position: any | null): number {
-    if (!position) return 0;
-
-    const qty = Number(position.netqty);
-
-    if (Number.isNaN(qty)) {
-      this.logger.error(`❌ Invalid netqty received: ${position.netqty}`);
-      return 0;
+    if (!Array.isArray(netPositions?.data)) {
+      this.logger.warn('⚠️ Net positions unavailable');
+      return { netQty: 0, positions: [] };
     }
 
-    return qty;
+    const matched = netPositions.data.filter(
+      (p) => p.token === token && p.exch === exchange,
+    );
+
+    const netQty = matched.reduce((sum, p) => sum + Number(p.netqty || 0), 0);
+
+    this.logger.log(
+      `📊 Net Position → token=${token} | netQty=${netQty} | breakdown=${matched
+        .map((p) => `${p.prd}:${p.netqty}`)
+        .join(', ')}`,
+    );
+
+    return { netQty, positions: matched };
   }
 
   // =====================================================
-  // 🔹 Add a helper to resolve trade quantity
+  // 🔹 TRADE QTY
   // =====================================================
   private resolveTradeQuantity(payload: TradingViewWebhookDto): number {
     const vol = Number(payload.volume);
 
-    if (payload.volume !== undefined && Number.isFinite(vol) && vol > 0) {
+    if (Number.isFinite(vol) && vol > 0) {
       this.logger.log(`📦 Using webhook volume: ${vol}`);
       return Math.floor(vol);
     }
@@ -109,9 +92,8 @@ export class TradingViewStrategy {
   }
 
   // =====================================================
-  // 🔹 ORDER HELPERS
+  // 🔹 ORDER
   // =====================================================
-
   private async placeMarketOrder(
     side: 'BUY' | 'SELL',
     quantity: number,
@@ -119,17 +101,11 @@ export class TradingViewStrategy {
     tradingSymbol: string,
     reason: string,
   ): Promise<void> {
-    if (quantity <= 0) {
-      this.logger.warn(`⚠️ Invalid quantity ${quantity}, skipping order`);
-      return;
-    }
-
-    const buyOrSell = side === 'BUY' ? 'B' : 'S';
+    if (quantity <= 0) return;
 
     const orderId = await this.orderService.placeOrder({
-      buy_or_sell: buyOrSell,
-      //product_type: 'C', // delivery
-      product_type: 'I', // intraday
+      buy_or_sell: side === 'BUY' ? 'B' : 'S',
+      product_type: 'I',
       exchange: payload.exchange,
       tradingsymbol: tradingSymbol,
       quantity,
@@ -142,194 +118,129 @@ export class TradingViewStrategy {
       remarks: `${reason} | ${payload.strategy}`,
     });
 
-    this.logger.log(
-      `✅ ${side} order placed | Qty=${quantity} | OrderId=${orderId}`,
-    );
+    this.logger.log(`✅ ${side} placed | Qty=${quantity} | OrderId=${orderId}`);
   }
 
   // =====================================================
-  // 🔹 WAIT & CONFIRM POSITION CLOSE
+  // 🔹 WAIT FOR FLATTEN
   // =====================================================
-
   private async waitForPositionToClose(
     token: string,
+    exchange: string,
     retries = 3,
     delayMs = 1000,
-  ): Promise<boolean> {
-    for (let attempt = 1; attempt <= retries; attempt++) {
+  ): Promise<void> {
+    for (let i = 1; i <= retries; i++) {
       await this.sleep(delayMs);
 
-      const position = await this.getNetPositionByToken(token);
-      const netQty = this.normalizeNetQty(position);
+      const { netQty } = await this.getAggregatedNetPosition(token, exchange);
+      this.logger.log(`⏳ Recheck ${i}/${retries} → netQty=${netQty}`);
 
-      this.logger.log(`⏳ Recheck ${attempt}/${retries} → netQty=${netQty}`);
-
-      if (netQty === 0) {
-        return true;
-      }
+      if (netQty === 0) return;
     }
 
-    return false;
+    this.logger.warn('⚠️ Position not fully flattened after retries');
   }
 
   // =====================================================
-  // 🔹 CLOSE OPPOSITE POSITION (FULL QTY)
+  // 🔹 CLOSE OPPOSITE
   // =====================================================
-
-  private async closeOppositePositionIfAny(
+  private async closeOppositeIfAny(
     netQty: number,
     payloadSide: 'BUY' | 'SELL',
     tradingSymbol: string,
     payload: TradingViewWebhookDto,
-  ): Promise<{ closedOpposite: boolean }> {
-    if (netQty === 0) {
-      return { closedOpposite: false };
-    }
+  ): Promise<boolean> {
+    if (netQty === 0) return false;
 
-    const positionSide: 'BUY' | 'SELL' = netQty > 0 ? 'BUY' : 'SELL';
+    const currentSide: 'BUY' | 'SELL' = netQty > 0 ? 'BUY' : 'SELL';
 
-    if (positionSide === payloadSide) {
-      this.logger.log('ℹ️ Existing position is same side. No close required.');
-      return { closedOpposite: false };
+    if (currentSide === payloadSide) {
+      this.logger.log('ℹ️ Same-side position exists. No close needed.');
+      return false;
     }
 
     const closeQty = Math.abs(netQty);
-    const closeSide: 'BUY' | 'SELL' = positionSide === 'BUY' ? 'SELL' : 'BUY';
+    const closeSide: 'BUY' | 'SELL' = currentSide === 'BUY' ? 'SELL' : 'BUY';
 
-    this.logger.log(`🔁 Closing opposite position → ${closeSide} ${closeQty}`);
+    this.logger.log(`🔁 Closing ${closeSide} ${closeQty}`);
 
     await this.placeMarketOrder(
       closeSide,
       closeQty,
       payload,
       tradingSymbol,
-      'AUTO CLOSE OPPOSITE POSITION',
+      'AUTO CLOSE OPPOSITE',
     );
 
-    await this.waitForPositionToClose(payload.token);
+    await this.waitForPositionToClose(payload.token, payload.exchange);
 
-    this.logger.log('✅ Opposite position close initiated');
-
-    return { closedOpposite: true };
-
+    return true;
   }
 
   // =====================================================
-  // 🔹 MAIN STRATEGY EXECUTION
+  // 🔹 MAIN EXECUTION
   // =====================================================
-
   async execute(payload: TradingViewWebhookDto): Promise<void> {
-    this.logger.log(
-      `📩 TradingView Signal Received: ${JSON.stringify(payload)}`,
-    );
+    this.logger.log(`📩 Signal → ${JSON.stringify(payload)}`);
 
     try {
-      // -------------------------------
-      // 1️⃣ SECURITY VALIDATION
-      // -------------------------------
-      const securityInfo = await this.marketService
-        .getSecurityInfo({
-          exchange: payload.exchange,
-          token: payload.token,
-        })
-        .catch(() => null);
+      const security = await this.marketService.getSecurityInfo({
+        exchange: payload.exchange,
+        token: payload.token,
+      });
 
-      if (!securityInfo) {
-        this.logger.warn(
-          `⚠️ Security not found: ${payload.exchange}:${payload.token}`,
-        );
-        return;
-      }
+      if (!security) return;
 
-      const tradingSymbol = securityInfo.tsym;
-      this.logger.log(`✅ Security validated: ${tradingSymbol}`);
+      const tradingSymbol = security.tsym;
 
-      // -------------------------------
-      // 2️⃣ INITIAL POSITION CHECK
-      // -------------------------------
-      const position = await this.getNetPositionByToken(payload.token);
-      const netQty = this.normalizeNetQty(position);
+      // 1️⃣ Initial net position
+      const { netQty } = await this.getAggregatedNetPosition(
+        payload.token,
+        payload.exchange,
+      );
 
-      this.logger.log(`🧠 Initial Position Gate → netQty=${netQty}`);
+      this.logger.log(`🧠 Initial netQty=${netQty}`);
 
-      // -------------------------------
-      // 3️⃣ CLOSE OPPOSITE POSITION
-      // -------------------------------
-     const result = await this.closeOppositePositionIfAny(
-       netQty,
-       payload.side,
-       tradingSymbol,
-       payload,
-     );
+      // 2️⃣ Close opposite if required
+      const closedOpposite = await this.closeOppositeIfAny(
+        netQty,
+        payload.side,
+        tradingSymbol,
+        payload,
+      );
 
-
-      // -------------------------------
-      // 4️⃣ FINAL CONFIRMATION
-      // -------------------------------
-      const finalPosition = await this.getNetPositionByToken(payload.token);
-      const finalNetQty = this.normalizeNetQty(finalPosition);
-
-      this.logger.log(`🔐 Final Position Gate → netQty=${finalNetQty}`);
-
-      // -------------------------------
-      // 5️⃣ ENTRY
-      // -------------------------------
-      // if (finalNetQty === 0) {
-      //   const entryQty = this.resolveTradeQuantity(payload);
-
-      //   this.logger.log(
-      //     `🚀 Fresh ${payload.side} entry allowed | Qty=${entryQty}`,
-      //   );
-
-      //   await this.placeMarketOrder(
-      //     payload.side,
-      //     entryQty,
-      //     payload,
-      //     tradingSymbol,
-      //     'TV ENTRY',
-      //   );
-      // } else {
-      //   this.logger.log('⛔ Position still exists after close. Entry skipped.');
-      // }
-      // -------------------------------
-      // 5️⃣ ENTRY (FORCED & SAFE)
-      // -------------------------------
       const entryQty = this.resolveTradeQuantity(payload);
 
-      // If opposite position was closed → ALWAYS enter
-      if (result.closedOpposite) {
-        this.logger.log(
-          `🚀 Forced ${payload.side} entry after opposite close | Qty=${entryQty}`,
-        );
+      // 3️⃣ ENTRY LOGIC (GUARANTEED)
+      if (closedOpposite) {
+        this.logger.log(`🚀 Forced ${payload.side} entry`);
 
         await this.placeMarketOrder(
           payload.side,
           entryQty,
           payload,
           tradingSymbol,
-          'TV ENTRY AFTER CLOSE',
+          'ENTRY AFTER CLOSE',
         );
         return;
       }
 
-      // If no position exists → normal entry
-      if (finalNetQty === 0) {
-        this.logger.log(`🚀 Fresh ${payload.side} entry | Qty=${entryQty}`);
+      if (netQty === 0) {
+        this.logger.log(`🚀 Fresh ${payload.side} entry`);
 
         await this.placeMarketOrder(
           payload.side,
           entryQty,
           payload,
           tradingSymbol,
-          'TV ENTRY',
+          'FRESH ENTRY',
         );
       } else {
-        this.logger.log('ℹ️ Position already exists. Entry skipped.');
+        this.logger.log('ℹ️ Position already aligned. No action.');
       }
-
-      this.logger.log('✅ Strategy execution completed');
     } catch (err) {
-      this.logger.error('🔥 Strategy execution failed', err?.message || err);
+      this.logger.error('🔥 Strategy failed', err?.message || err);
     }
   }
 }
