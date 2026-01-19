@@ -13,7 +13,7 @@ export class PlaceOrderDto {
   @IsEnum(['B', 'S'])
   buy_or_sell: 'B' | 'S';
 
-  @IsEnum(['C', 'M', 'H'])
+  @IsEnum(['C', 'M', 'H', 'I'])
   product_type: 'C' | 'M' | 'H' | 'I';
 
   @IsString()

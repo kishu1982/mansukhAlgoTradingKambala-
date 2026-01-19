@@ -129,6 +129,23 @@ export class TradingViewStrategy {
   }
 
   // =====================================================
+  // 🔹 FINAL TRADE QTY (QTY × LOT SIZE)
+  // =====================================================
+  private getFinalTradeQuantity(
+    payload: TradingViewWebhookDto,
+    lotSize: number,
+  ): number {
+    const baseQty = this.resolveTradeQuantity(payload);
+    const finalQty = baseQty * (Number(lotSize) || 1);
+
+    this.logger.log(
+      `🧮 Quantity calc → baseQty=${baseQty}, lotSize=${lotSize}, finalQty=${finalQty}`,
+    );
+
+    return finalQty;
+  }
+
+  // =====================================================
   // 🔹 ORDER
   // =====================================================
   private async placeMarketOrder(
@@ -243,6 +260,9 @@ export class TradingViewStrategy {
       if (!security) return;
 
       const tradingSymbol = security.tsym;
+      const lotSize = Number(security.ls) || 1;
+
+      this.logger.log(`📐 Lot size detected → ls=${lotSize}`);
 
       // 1️⃣ Initial net position
       const { netQty } = await this.getAggregatedNetPosition(
@@ -260,7 +280,8 @@ export class TradingViewStrategy {
         payload,
       );
 
-      const entryQty = this.resolveTradeQuantity(payload);
+      //const entryQty = this.resolveTradeQuantity(payload);
+      const entryQty = this.getFinalTradeQuantity(payload, lotSize);
 
       // 3️⃣ ENTRY LOGIC (GUARANTEED)
       if (closedOpposite) {
