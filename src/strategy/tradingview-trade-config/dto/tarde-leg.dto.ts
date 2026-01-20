@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsString, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class TradeLegDto {
   @IsString()
@@ -8,8 +8,11 @@ export class TradeLegDto {
   exchange: string;
 
   @IsNumber()
-  @Min(1)
   quantityLots: number;
+
+  @IsString()
+  @IsOptional()
+  symbolName?: string;
 
   @IsEnum(['BUY', 'SELL'])
   side: 'BUY' | 'SELL';

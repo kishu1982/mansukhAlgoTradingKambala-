@@ -7,6 +7,8 @@ import {
 import { TradingViewStrategy } from './strategies/tradingview.strategy';
 import { TradingViewWebhookDto } from './dto/tradingview-webhook.dto';
 import { TradingViewSignalService } from 'src/database/services/tradingview-signal.service';
+import { TradingviewTradeConfigService } from './tradingview-trade-config/tradingview-trade-config.service';
+import { TradesService } from './trades/trades.service';
 
 @Injectable()
 export class StrategyService {
@@ -16,34 +18,114 @@ export class StrategyService {
   constructor(
     private readonly tradingViewStrategy: TradingViewStrategy,
     private readonly tradingViewSignalService: TradingViewSignalService,
+
+    private readonly tradeConfigService: TradingviewTradeConfigService,
+    private readonly tradesService: TradesService,
   ) {}
 
   // to get data from webhook . pass it to trading view service also save it to database
-  async handleTradingViewWebhook(payload: TradingViewWebhookDto) {
-    if (payload.secret !== this.TRADINGVIEW_SECRET) {
-      // throw new UnauthorizedException('Invalid TradingView secret');
-      this.logger.log('Invalid TradingView secret');
-      //throw new UnauthorizedException('invalid secret key recived from tradingview signal');
-      return {
-        success: false,
-        message: 'invalid secret key received from TradingView signal',
-      }; // Missing colon, inconsistent format
-    }
+  //🔁 Webhook → Service → Config → Final Trades
+  async handleTradingViewWebhook(
+    payload: TradingViewWebhookDto,
+  ): Promise<void> {
+    try {
+      /* ─────────────────────────────────────────
+       0️⃣ Validate TradingView Secret
+    ───────────────────────────────────────── */
+      if (payload.secret !== this.TRADINGVIEW_SECRET) {
+        this.logger.warn(`Invalid TradingView secret | token=${payload.token}`);
+        return; // stop further processing safely
+      }
 
-    // 1️⃣ Save in DB (Database module)
-    await this.tradingViewSignalService.saveSignal({
-      exchange: payload.exchange,
-      symbol: payload.symbol,
-      token: payload.token,
-      side: payload.side,
-      price: Number(payload.price),
-      interval: payload.interval,
-      strategy: payload.strategy,
-      rawPayload: payload,
-    });
-    // console.log('data recived for tv signal: ', payload);
-    // 2️⃣ Run strategy logic
-    this.tradingViewStrategy.execute(payload);
+      /* ─────────────────────────────────────────
+       1️⃣ Save TradingView Signal
+    ───────────────────────────────────────── */
+      let signal: any = null;
+      try {
+        signal = await this.tradingViewSignalService.saveSignal({
+          exchange: payload.exchange,
+          symbol: payload.symbol,
+          token: payload.token,
+          side: payload.side,
+          price: Number(payload.price),
+          interval: payload.interval,
+          strategy: payload.strategy,
+          rawPayload: payload,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Failed to save TradingView signal | token=${payload.token}`,
+          err?.stack,
+        );
+      }
+
+      /* ─────────────────────────────────────────
+       2️⃣ Match Trade Configuration
+    ───────────────────────────────────────── */
+      let matchedConfigs: any[] = [];
+      try {
+        matchedConfigs = await this.tradeConfigService.findMatchingConfigs(
+          payload.token,
+          payload.side,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Error while matching trade config | token=${payload.token}, side=${payload.side}`,
+          err?.stack,
+        );
+      }
+
+      if (!matchedConfigs.length) {
+        this.logger.warn(
+          `NO_MATCH | token=${payload.token}, side=${payload.side}`,
+        );
+      } else {
+        /* ─────────────────────────────────────────
+         3️⃣ Create Final Trades (ONLY IF MATCHED)
+      ───────────────────────────────────────── */
+        try {
+          if (signal) {
+            await this.tradesService.createFinalTrades(signal, matchedConfigs);
+            this.logger.log(
+              `TRADE_CREATED | token=${payload.token}, side=${payload.side}`,
+            );
+          } else {
+            this.logger.warn(
+              'Skipping createFinalTrades because signal was not saved',
+            );
+          }
+        } catch (err) {
+          this.logger.error(
+            `Failed to create final trades | token=${payload.token}`,
+            err?.stack,
+          );
+        }
+      }
+
+      /* ─────────────────────────────────────────
+       4️⃣ Execute Strategy (Independent)
+    ───────────────────────────────────────── */
+      try {
+        // temporarily disable strategy execution
+        // this.tradingViewStrategy.execute(payload);
+        this.logger.log(
+          'Strategy execution is currently disabled on page strategy.service.ts ln 110',
+        );
+      } catch (err) {
+        this.logger.error(
+          `Strategy execution failed | token=${payload.token}`,
+          err?.stack,
+        );
+      }
+    } catch (err) {
+      /* ─────────────────────────────────────────
+       🔴 ABSOLUTE FAIL-SAFE
+    ───────────────────────────────────────── */
+      this.logger.error(
+        'Unhandled error in handleTradingViewWebhook',
+        err?.stack,
+      );
+    }
   }
 
   /**

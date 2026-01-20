@@ -109,7 +109,8 @@ export class TradingviewTradeConfigService {
         tradeLegs = dto.toBeTradedOn.map((leg) => ({
           tokenNumber: leg.tokenNumber,
           exchange: leg.exchange,
-          symbolName: dto.symbolName,
+          // ✅ USE LEG SYMBOL IF PROVIDED, ELSE FALLBACK
+          symbolName: leg.symbolName?.trim() || dto.symbolName,
           quantityLots: leg.quantityLots,
           side: leg.side,
           productType: dto.productType,
@@ -215,5 +216,37 @@ export class TradingviewTradeConfigService {
         'Failed to delete trade configuration',
       );
     }
+  }
+
+  async findMatchingConfigs(token: string, side: 'BUY' | 'SELL') {
+    const normalizedToken = String(token).trim();
+    const normalizedSide = side.trim().toUpperCase();
+    this.logger.log(
+      `Finding matching configs | token=${normalizedToken}, side=${normalizedSide}`,
+    );
+
+    const allConfigs = await this.tradeConfigRepo.find();
+
+    // this.logger.debug(
+    //   `Available configs: ${JSON.stringify(
+    //     allConfigs.map(c => ({
+    //       tokenNumber: c.tokenNumber,
+    //       side: c.side,
+    //       isEnabled: c.isEnabled,
+    //       signalStatus: c.signalStatus,
+    //     })),
+    //     null,
+    //     2,
+    //   )}`,
+    // );
+
+    return this.tradeConfigRepo.find({
+      where: {
+        tokenNumber: normalizedToken,
+        side: normalizedSide,
+        isEnabled: true,
+        signalStatus: 'ACTIVE',
+      },
+    });
   }
 }

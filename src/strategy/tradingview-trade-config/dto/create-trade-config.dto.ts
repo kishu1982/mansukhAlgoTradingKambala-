@@ -30,7 +30,6 @@ export class CreateTradeConfigDto {
   symbolName: string;
 
   @IsNumber()
-  @Min(1)
   @IsNotEmpty()
   quantityLots: number;
 
