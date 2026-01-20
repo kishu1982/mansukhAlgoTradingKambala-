@@ -6,9 +6,10 @@ import { DatabaseModule } from 'src/database/database.module';
 import { MarketModule } from 'src/market/market.module';
 import { OrdersModule } from 'src/orders/orders.module';
 import { AutoSquareOffService } from './strategies/auto-squareoff.service';
+import { TradingviewTradeConfigModule } from './tradingview-trade-config/tradingview-trade-config.module';
 
 @Module({
-  imports: [DatabaseModule, MarketModule, OrdersModule],
+  imports: [DatabaseModule, MarketModule, OrdersModule, TradingviewTradeConfigModule],
   controllers: [TradingViewController],
   providers: [StrategyService, TradingViewStrategy, AutoSquareOffService], // 🔴 REQUIRED],
   exports: [StrategyService], // 👈 IMPORTANT (used by WebSocket module)
