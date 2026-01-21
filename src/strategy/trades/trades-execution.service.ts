@@ -3,17 +3,26 @@ import { TradesService } from './trades.service';
 import { MarketService } from 'src/market/market.service';
 import { OrdersService } from 'src/orders/orders.service';
 import { FinalTradeToBePlacedEntity } from './entities/final-trade-to-be-placed.entity';
+import { ConfigService } from '@nestjs/config';
+import { Interval } from '@nestjs/schedule';
+
 
 @Injectable()
 export class TradesExecutionService {
   private readonly logger = new Logger(TradesExecutionService.name);
+  private isExecuting = false;
+
 
   // =====================================================
   // 🔹 TIME CONFIG (IST)
   // =====================================================
-  private readonly MARKET_START_TIME = '09:15';
-  private readonly MARKET_CUTOFF_TIME = '15:25';
+  // private readonly MARKET_START_TIME = '09:15';
+  // private readonly MARKET_CUTOFF_TIME = '15:25';
 
+    // Just declare — do NOT initialize yet
+  private readonly MARKET_START_TIME: string;
+  private readonly MARKET_CUTOFF_TIME: string;
+  
   private readonly TIME_RESTRICTED_EXCHANGES = new Set([
     'NSE',
     'NFO',
@@ -25,7 +34,12 @@ export class TradesExecutionService {
     private readonly tradesService: TradesService,
     private readonly marketService: MarketService,
     private readonly orderService: OrdersService,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+        // ← now it's safe
+    this.MARKET_START_TIME  = this.configService.get<string>('TRADING_START_TIME', '09:15');   // ← add fallback if possible
+    this.MARKET_CUTOFF_TIME = this.configService.get<string>('TRADING_END_TIME',   '15:30');
+  }
 
   // =====================================================
   // 🔹 IST TIME CHECK
@@ -161,13 +175,18 @@ export class TradesExecutionService {
   // =====================================================
   // 🔹 EXECUTE ALL PENDING TRADES
   // =====================================================
-  async executeTrades(): Promise<void> {
-    this.logger.log('🚀 Starting trade execution cycle');
+@Interval(1000)
+async executeTrades(): Promise<void> {
 
-    if (!this.isWithinTradingTime()) {
-      this.logger.warn('⏰ Trading window closed. Skipping execution.');
-      return;
-    }
+  if (this.isExecuting) {
+   // this.logger.debug('⏳ Previous execution still running, skipping cycle');
+    return;
+  }
+
+  this.isExecuting = true;
+
+  try {
+  //  this.logger.log('🚀 Starting trade execution cycle');
 
     let pendingTrades: FinalTradeToBePlacedEntity[] = [];
 
@@ -179,13 +198,27 @@ export class TradesExecutionService {
     }
 
     if (!pendingTrades.length) {
-      this.logger.log('ℹ️ No pending trades found');
+      //this.logger.debug('ℹ️ No pending trades found');
       return;
     }
 
     for (const trade of pendingTrades) {
       try {
+        const exchange = trade.exchange;
+
+        // Time restriction applies ONLY to listed exchanges
+        if (
+          this.TIME_RESTRICTED_EXCHANGES.has(exchange) &&
+          !this.isWithinTradingTime()
+        ) {
+          this.logger.warn(
+            `⏰ Trading time over. Skipping trade for ${exchange}|${trade.token}|${trade.symbol}`
+          );
+          continue;
+        }
+
         await this.executeSingleTrade(trade);
+
       } catch (err) {
         this.logger.error(
           `Trade execution failed | tradeId=${trade._id}`,
@@ -193,7 +226,12 @@ export class TradesExecutionService {
         );
       }
     }
+
+  } finally {
+    this.isExecuting = false; // 🔐 release lock
   }
+}
+
 
   /*
 

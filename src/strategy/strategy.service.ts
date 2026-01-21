@@ -15,6 +15,7 @@ export class StrategyService {
   private readonly logger = new Logger(StrategyService.name);
   private readonly TRADINGVIEW_SECRET =
     process.env.TRADINGVIEW_SECRET || 'tv_secret_123';
+    
   constructor(
     private readonly tradingViewStrategy: TradingViewStrategy,
     private readonly tradingViewSignalService: TradingViewSignalService,

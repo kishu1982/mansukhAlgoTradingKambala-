@@ -27,49 +27,7 @@ export class TradingviewTradeConfigService {
    * - If exists → UPDATE only
    * - If not exists → CREATE
    */
-  //   async saveOrUpdate(dto: CreateTradeConfigDto) {
-  //     const uniqueFilter = {
-  //       tokenNumber: dto.tokenNumber,
-  //       symbolName: dto.symbolName,
-  //       side: dto.side,
-  //     };
-
-  //     const existing = await this.tradeConfigRepo.findOne({
-  //       where: uniqueFilter,
-  //     });
-
-  //     if (existing) {
-  //       // ✅ UPDATE ONLY
-  //       Object.assign(existing, {
-  //         strategyName: dto.strategyName,
-  //         exchange: dto.exchange,
-  //         quantity: dto.quantity,
-  //         side: dto.side,
-  //         productType: dto.productType,
-  //         legs: dto.legs,
-  //         signalStatus: dto.signalStatus,
-  //         isEnabled: dto.signalStatus === 'ACTIVE',
-  //       });
-
-  //       this.logger.log(
-  //         `Updated config for ${dto.symbolName} (${dto.tokenNumber})`,
-  //       );
-
-  //       return this.tradeConfigRepo.save(existing);
-  //     }
-
-  //     // ✅ CREATE ONLY IF NOT EXISTS
-  //     const newConfig = this.tradeConfigRepo.create({
-  //       ...dto,
-  //       isEnabled: dto.signalStatus === 'ACTIVE',
-  //     });
-
-  //     this.logger.log(
-  //       `Created new config for ${dto.symbolName} (${dto.tokenNumber})`,
-  //     );
-
-  //     return this.tradeConfigRepo.save(newConfig);
-  //   }
+  
   async saveOrUpdate(dto: CreateTradeConfigDto) {
     const filter = {
       tokenNumber: dto.tokenNumber,
