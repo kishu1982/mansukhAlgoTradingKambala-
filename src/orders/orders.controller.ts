@@ -5,6 +5,7 @@ import {
   BadRequestException,
   UsePipes,
   ValidationPipe,
+  Get,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { PlaceOrderDto } from './dto/place-order.dto';
@@ -78,11 +79,11 @@ export class OrdersController {
     return this.ordersService.getOrderMargin(body);
   }
 
-  /*============= trade book ======*/
-  @Post('trade-book')
-  getTradeBook() {
-    return this.ordersService.getTradeBook();
-  }
+  // /*============= trade book ======*/
+  // @Post('trade-book')
+  // getTradeBook() {
+  //   return this.ordersService.getTradeBook();
+  // }
 
   /* ===================== POSITION BOOK ===================== */
 
@@ -132,5 +133,18 @@ export class OrdersController {
   @Post('net-positions')
   getNetPositions() {
     return this.ordersService.getNetPositions();
+  }
+
+  /* ================= GET ORDER BOOK ================= */
+
+  @Get('order-book')
+  async getOrderBook() {
+    return this.ordersService.getOrderBook();
+  }
+  /* ================= GET TRADE BOOK ================= */
+
+  @Get('trade-book')
+  async getTradeBook() {
+    return this.ordersService.getTradeBook();
   }
 }

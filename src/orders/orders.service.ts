@@ -290,16 +290,15 @@ export class OrdersService {
     orderno: string;
     exchange: string;
     tradingsymbol: string;
-    newquantity?: number;
-    newprice_type?: 'LMT' | 'MKT' | 'SL-LMT' | 'SL-MKT';
-    newprice?: number;
-    newtrigger_price?: number;
-    amo?: 'YES' | 'NO';
+    quantity?: number; // 🔥 ADD THIS
+    newprice_type: 'SL-MKT' | 'SL-LMT' | 'LMT' | 'MKT';
+    newprice?: string | number;
+    newtrigger_price?: string | number;
   }) {
     const token = this.tokenService.getToken();
     const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
 
-    /* ---------------- BASIC VALIDATION ---------------- */
+    /* ---------------- REQUIRED VALIDATION ---------------- */
 
     if (!data.orderno || !data.exchange || !data.tradingsymbol) {
       throw new BadRequestException(
@@ -307,48 +306,53 @@ export class OrdersService {
       );
     }
 
-    /* ---------------- BUILD PAYLOAD (ONLY VALID FIELDS) ---------------- */
+    if (
+      (data.newprice_type === 'SL-MKT' || data.newprice_type === 'SL-LMT') &&
+      data.newtrigger_price === undefined
+    ) {
+      throw new BadRequestException(
+        'newtrigger_price is required for stop loss orders',
+      );
+    }
+
+    /* ---------------- BUILD EXACT PAYLOAD ---------------- */
 
     const jData: any = {
       uid: token.UID,
-      actid: token.Account_ID,
-      norenordno: data.orderno,
       exch: data.exchange,
       tsym: data.tradingsymbol,
-      amo: data.amo ?? 'NO',
+      norenordno: data.orderno,
+      qty: String(data.quantity ?? 1), // 🔥 REQUIRED
+      prctyp: data.newprice_type,
+      ordersource: 'API',
     };
 
-    if (data.newquantity !== undefined) {
-      jData.qty = String(data.newquantity);
+    /**
+     * 🔥 SL-MKT RULE (MANDATORY)
+     */
+    if (data.newprice_type === 'SL-MKT') {
+      jData.prc = '0'; // MUST be sent
+      jData.trgprc = String(data.newtrigger_price);
     }
 
-    if (data.newprice_type) {
-      jData.prctyp = data.newprice_type;
+    /**
+     * SL-LMT
+     */
+    if (data.newprice_type === 'SL-LMT') {
+      jData.prc = String(data.newprice);
+      jData.trgprc = String(data.newtrigger_price);
+    }
 
-      // 🔥 Price only for LIMIT types
-      if (data.newprice_type === 'LMT' || data.newprice_type === 'SL-LMT') {
-        if (data.newprice === undefined) {
-          throw new BadRequestException(
-            'newprice is required for limit orders',
-          );
-        }
-        jData.prc = String(data.newprice);
-      }
-
-      // 🔥 Trigger price ONLY for SL
-      if (data.newprice_type === 'SL-LMT' || data.newprice_type === 'SL-MKT') {
-        if (data.newtrigger_price === undefined) {
-          throw new BadRequestException(
-            'newtrigger_price is required for stop loss orders',
-          );
-        }
-        jData.trgprc = String(data.newtrigger_price);
-      }
+    /**
+     * LMT
+     */
+    if (data.newprice_type === 'LMT') {
+      jData.prc = String(data.newprice);
     }
 
     const payload = `jData=${JSON.stringify(jData)}`;
 
-    this.logger.debug(`📤 MODIFY ORDER RAW → ${payload}`);
+    this.logger.debug(`📤 MODIFY ORDER → ${payload}`);
 
     /* ---------------- API CALL ---------------- */
 
@@ -356,45 +360,36 @@ export class OrdersService {
       const response = await axios.post(`${baseUrl}/ModifyOrder`, payload, {
         headers: {
           Authorization: `Bearer ${token.Access_token}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
         transformRequest: [(d) => d],
         timeout: 10000,
       });
 
       if (response.data?.stat === 'Not_Ok') {
-        this.logger.warn(`❌ ModifyOrder Error → ${response.data.emsg}`);
-
         throw new BadRequestException({
-          message: 'Order modification rejected by broker',
+          message: 'Order modification rejected by exchange',
           brokerError: response.data.emsg,
+          raw: response.data,
         });
       }
 
       return response.data;
     } catch (error) {
       if (error instanceof AxiosError) {
-        const brokerMsg =
-          error.response?.data?.emsg ||
-          error.response?.data?.message ||
-          error.message;
-
-        this.logger.error(`🚨 ModifyOrder Axios Error → ${brokerMsg}`);
-
         throw new BadRequestException({
-          message: 'Failed to modify order',
-          brokerError: brokerMsg,
-          statusCode: error.response?.status,
+          message: 'Modify order failed',
+          brokerError:
+            error.response?.data?.emsg || error.response?.data || error.message,
         });
       }
 
-      this.logger.error('🔥 Unexpected ModifyOrder Error', error);
-
-      throw new InternalServerErrorException({
-        message: 'Unexpected error while modifying order',
-      });
+      throw new InternalServerErrorException(
+        'Unexpected error while modifying order',
+      );
     }
   }
+
   /* ========================= CANCEL ORDER ========================= */
 
   async cancelOrder(orderno: string) {
@@ -612,77 +607,77 @@ export class OrdersService {
 
   /* ===================== TRADE BOOK ===================== */
 
-  async getTradeBook() {
-    try {
-      const token = this.tokenService.getToken();
-      const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
+  // async getTradeBook() {
+  //   try {
+  //     const token = this.tokenService.getToken();
+  //     const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
 
-      if (!token?.Access_token) {
-        throw new UnauthorizedException('Access token not found');
-      }
+  //     if (!token?.Access_token) {
+  //       throw new UnauthorizedException('Access token not found');
+  //     }
 
-      const jData = {
-        uid: token.UID,
-        actid: token.Account_ID,
-      };
+  //     const jData = {
+  //       uid: token.UID,
+  //       actid: token.Account_ID,
+  //     };
 
-      const payload = `jData=${JSON.stringify(jData)}`;
+  //     const payload = `jData=${JSON.stringify(jData)}`;
 
-      this.logger.debug(`📤 TRADE BOOK → ${payload}`);
+  //     this.logger.debug(`📤 TRADE BOOK → ${payload}`);
 
-      const response = await axios.post(`${baseUrl}/TradeBook`, payload, {
-        headers: {
-          Authorization: `Bearer ${token.Access_token}`,
-          'Content-Type': 'text/plain',
-        },
-        transformRequest: [(d) => d],
-        timeout: 10000,
-      });
+  //     const response = await axios.post(`${baseUrl}/TradeBook`, payload, {
+  //       headers: {
+  //         Authorization: `Bearer ${token.Access_token}`,
+  //         'Content-Type': 'text/plain',
+  //       },
+  //       transformRequest: [(d) => d],
+  //       timeout: 10000,
+  //     });
 
-      /* ❌ Noren logical error */
-      if (response.data?.stat === 'Not_Ok') {
-        throw new BadRequestException({
-          message: 'TradeBook request failed',
-          error: response.data.emsg,
-          raw: response.data,
-        });
-      }
+  //     /* ❌ Noren logical error */
+  //     if (response.data?.stat === 'Not_Ok') {
+  //       throw new BadRequestException({
+  //         message: 'TradeBook request failed',
+  //         error: response.data.emsg,
+  //         raw: response.data,
+  //       });
+  //     }
 
-      /* ✅ Success */
-      return {
-        success: true,
-        data: response.data,
-      };
-    } catch (error) {
-      /* ❌ Axios / Network / API error */
-      if (error instanceof AxiosError) {
-        this.logger.error(
-          '❌ TradeBook Axios Error',
-          error.response?.data || error.message,
-        );
+  //     /* ✅ Success */
+  //     return {
+  //       success: true,
+  //       data: response.data,
+  //     };
+  //   } catch (error) {
+  //     /* ❌ Axios / Network / API error */
+  //     if (error instanceof AxiosError) {
+  //       this.logger.error(
+  //         '❌ TradeBook Axios Error',
+  //         error.response?.data || error.message,
+  //       );
 
-        throw new BadRequestException({
-          message: 'Failed to fetch TradeBook from Noren',
-          error: error.response?.data || error.message,
-        });
-      }
+  //       throw new BadRequestException({
+  //         message: 'Failed to fetch TradeBook from Noren',
+  //         error: error.response?.data || error.message,
+  //       });
+  //     }
 
-      /* ❌ Already handled Nest exception */
-      if (
-        error instanceof BadRequestException ||
-        error instanceof UnauthorizedException
-      ) {
-        throw error;
-      }
+  //     /* ❌ Already handled Nest exception */
+  //     if (
+  //       error instanceof BadRequestException ||
+  //       error instanceof UnauthorizedException
+  //     ) {
+  //       throw error;
+  //     }
 
-      /* ❌ Unknown error */
-      this.logger.error('❌ TradeBook Unknown Error', error);
+  //     /* ❌ Unknown error */
+  //     this.logger.error('❌ TradeBook Unknown Error', error);
 
-      throw new InternalServerErrorException(
-        'Unexpected error while fetching TradeBook',
-      );
-    }
-  }
+  //     throw new InternalServerErrorException(
+  //       'Unexpected error while fetching TradeBook',
+  //     );
+  //   }
+  // }
   /* ===================== POSITION BOOK ===================== */
 
   async getPositionBook() {
@@ -1120,6 +1115,179 @@ export class OrdersService {
         data: [],
         error: safeMessage,
       };
+    }
+  }
+
+  /* ================= GET ORDER BOOK ================= */
+
+  async getOrderBook() {
+    try {
+      // 🔐 Load saved token
+      const token = this.tokenService.getToken();
+
+      if (!token?.Access_token || !token?.UID || !token?.Account_ID) {
+        throw new UnauthorizedException('Invalid or missing access token');
+      }
+
+      // 🧠 Init SDK
+      const api = new NorenRestApi();
+      this.tokenService.prepareSdk(api);
+
+      this.logger.debug('📤 SDK get_orderbook called');
+
+      const response = await api.get_orderbook();
+
+      // ❌ Logical API error
+      // if (response?.stat === 'Not_Ok') {
+      //   throw new InternalServerErrorException({
+      //     message: 'Order book fetch failed',
+      //     error: response.emsg,
+      //     raw: response,
+      //   });
+      // }
+
+      // // ✅ Success
+      // return {
+      //   status: 'OK',
+      //   count: Array.isArray(response) ? response.length : 0,
+      //   orders: response,
+      // };
+      /**
+       * ✅ CASE 1: Empty array → NO DATA (valid)
+       */
+      if (Array.isArray(response) && response.length === 0) {
+        return {
+          status: 'OK',
+          count: 0,
+          trades: [],
+          message: 'No trade data available',
+        };
+      }
+
+      /**
+       * ✅ CASE 2: API returns Not_Ok but means NO DATA
+       */
+      if (
+        response?.stat === 'Not_Ok' &&
+        typeof response?.emsg === 'string' &&
+        response.emsg.toLowerCase().includes('no')
+      ) {
+        return {
+          status: 'OK',
+          count: 0,
+          trades: [],
+          message: response.emsg || 'No trade data available',
+        };
+      }
+
+      /**
+       * ❌ CASE 3: Real API error
+       */
+      if (response?.stat === 'Not_Ok') {
+        throw new InternalServerErrorException({
+          message: 'Trade book fetch failed',
+          error: response.emsg,
+          raw: response,
+        });
+      }
+
+      /**
+       * ✅ CASE 4: Normal success
+       */
+      return {
+        status: 'OK',
+        count: Array.isArray(response) ? response.length : 0,
+        trades: response,
+      };
+    } catch (error) {
+      this.logger.error('❌ getOrderBook failed', error.message, error.stack);
+
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException({
+        message: 'Failed to fetch order book',
+        error: error.message,
+      });
+    }
+  }
+
+  /* ================= GET TRADE BOOK ================= */
+
+  async getTradeBook() {
+    try {
+      const token = this.tokenService.getToken();
+
+      if (!token?.Access_token || !token?.UID || !token?.Account_ID) {
+        throw new UnauthorizedException('Invalid or missing access token');
+      }
+
+      const api = new NorenRestApi();
+      this.tokenService.prepareSdk(api);
+
+      this.logger.debug('📤 SDK get_tradebook called');
+
+      const response = await api.get_tradebook();
+
+      /**
+       * ✅ CASE 1: Empty array → NO DATA (valid)
+       */
+      if (Array.isArray(response) && response.length === 0) {
+        return {
+          status: 'OK',
+          count: 0,
+          trades: [],
+          message: 'No trade data available',
+        };
+      }
+
+      /**
+       * ✅ CASE 2: API returns Not_Ok but means NO DATA
+       */
+      if (
+        response?.stat === 'Not_Ok' &&
+        typeof response?.emsg === 'string' &&
+        response.emsg.toLowerCase().includes('no')
+      ) {
+        return {
+          status: 'OK',
+          count: 0,
+          trades: [],
+          message: response.emsg || 'No trade data available',
+        };
+      }
+
+      /**
+       * ❌ CASE 3: Real API error
+       */
+      if (response?.stat === 'Not_Ok') {
+        throw new InternalServerErrorException({
+          message: 'Trade book fetch failed',
+          error: response.emsg,
+          raw: response,
+        });
+      }
+
+      /**
+       * ✅ CASE 4: Normal success
+       */
+      return {
+        status: 'OK',
+        count: Array.isArray(response) ? response.length : 0,
+        trades: response,
+      };
+    } catch (error) {
+      this.logger.error('❌ getTradeBook failed', error.message, error.stack);
+
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException({
+        message: 'Failed to fetch trade book',
+        error: error.message,
+      });
     }
   }
 }

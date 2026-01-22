@@ -34,4 +34,10 @@ export class TradingviewTradeConfigController {
   deleteById(@Param('id') id: string) {
     return this.service.deleteById(id);
   }
+
+  // to get list of unique token-exchange pairs from all active trade configs
+  @Get('subscriptions/tokens')
+  getSubscriptionTokens() {
+    return this.service.getUniqueTokenExchangePairs();
+  }
 }

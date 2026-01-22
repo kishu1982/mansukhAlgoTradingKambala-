@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsPositive,
@@ -17,26 +18,22 @@ export class ModifyOrderDto {
   @IsString()
   tradingsymbol: string;
 
-  @IsOptional()
+
   @IsNumber()
   @IsPositive()
   newquantity?: number;
-
-  @IsOptional()
+  
   @IsEnum(['LMT', 'MKT', 'SL-LMT', 'SL-MKT'])
-  newprice_type?: 'LMT' | 'MKT' | 'SL-LMT' | 'SL-MKT';
+  @IsNotEmpty()
+  newprice_type: 'LMT' | 'MKT' | 'SL-LMT' | 'SL-MKT'; // 🔥 REQUIRED// 🔥 REQUIRED
 
   @ValidateIf((o) => o.newprice_type === 'LMT' || o.newprice_type === 'SL-LMT')
-  @IsNumber()
-  @IsPositive()
-  newprice?: number;
+  newprice?: string;
 
   @ValidateIf(
     (o) => o.newprice_type === 'SL-LMT' || o.newprice_type === 'SL-MKT',
   )
-  @IsNumber()
-  @IsPositive()
-  newtrigger_price?: number;
+  newtrigger_price?: string;
 
   @IsOptional()
   @IsEnum(['YES', 'NO'])

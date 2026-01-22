@@ -27,7 +27,7 @@ export class TradingviewTradeConfigService {
    * - If exists → UPDATE only
    * - If not exists → CREATE
    */
-  
+
   async saveOrUpdate(dto: CreateTradeConfigDto) {
     const filter = {
       tokenNumber: dto.tokenNumber,
@@ -206,5 +206,30 @@ export class TradingviewTradeConfigService {
         signalStatus: 'ACTIVE',
       },
     });
+  }
+
+  async getUniqueTokenExchangePairs(): Promise<string[]> {
+    /**
+     * Output example:
+     * ['NSE|22', 'NSE|1594']
+     */
+
+    const configs = await this.tradeConfigRepo.find({
+      where: { isEnabled: true }, // optional but recommended
+    });
+
+    const uniqueSet = new Set<string>();
+
+    for (const config of configs) {
+      if (!Array.isArray(config.toBeTradedOn)) continue;
+
+      for (const leg of config.toBeTradedOn) {
+        if (!leg?.exchange || !leg?.tokenNumber) continue;
+
+        uniqueSet.add(`${leg.exchange}|${leg.tokenNumber}`);
+      }
+    }
+
+    return Array.from(uniqueSet);
   }
 }

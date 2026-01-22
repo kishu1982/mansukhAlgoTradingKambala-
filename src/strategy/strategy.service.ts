@@ -15,7 +15,7 @@ export class StrategyService {
   private readonly logger = new Logger(StrategyService.name);
   private readonly TRADINGVIEW_SECRET =
     process.env.TRADINGVIEW_SECRET || 'tv_secret_123';
-    
+
   constructor(
     private readonly tradingViewStrategy: TradingViewStrategy,
     private readonly tradingViewSignalService: TradingViewSignalService,
@@ -135,7 +135,10 @@ export class StrategyService {
   onTick(tickData: any): void {
     // Raw tick logging
     //this.logger.log(`Tick Received: ${JSON.stringify(tickData)}`);
-    tickData.tk==='49229' && tickData.lp>0? this.logger.log(`Tick Received: ${JSON.stringify(tickData.lp)}`):"";
+    // tickData.tk==='49229' && tickData.lp>0? this.logger.log(`Tick Received: ${JSON.stringify(tickData.lp)}`):"";
+    tickData.lp > 0
+      ? this.logger.log(`Tick Received: ${JSON.stringify(tickData.lp)}`)
+      : '';
     // tickData.lp > 0 || tickData.bp1 > 0 || tickData.sp1 > 0
     //   ? console.log('tick data : ', tickData.ltp)
     //   : '';

@@ -7,6 +7,7 @@ import {
 import { TokenService } from '../token/token.service';
 import { StrategyService } from 'src/strategy/strategy.service';
 import { WS_SUBSCRIPTIONS } from './subscriptions/ws.subscriptions';
+import { TradingviewTradeConfigService } from 'src/strategy/tradingview-trade-config/tradingview-trade-config.service';
 
 const NorenWebSocket = require('norenrestapi/lib/websocket');
 
@@ -20,6 +21,7 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly tokenService: TokenService,
     private readonly strategyService: StrategyService,
+    private readonly tradeConfigService: TradingviewTradeConfigService,
   ) {}
 
   /* ===============================
@@ -61,7 +63,7 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
       };
 
       const callbacks = {
-        socket_open: () => {
+        socket_open: async () => {
           this.isConnected = true;
           this.logger.log('✅ Noren WebSocket Connected');
 
@@ -73,7 +75,15 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
           //   'MCX|472780', // GOLDM
           // ]);
           // 🔔 subscribe from central config
-          this.subscribeGroup('DEFAULT');
+          //this.subscribeGroup('DEFAULT');
+          try {
+            await this.subscribeGroup('DEFAULT');
+          } catch (error) {
+            this.logger.error(
+              'Failed to subscribe websocket instruments',
+              error.stack,
+            );
+          }
         },
 
         socket_close: () => {
@@ -172,15 +182,40 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
   }
 
   //Subscribe using group name
-  private subscribeGroup(group: keyof typeof WS_SUBSCRIPTIONS) {
-    const symbols = WS_SUBSCRIPTIONS[group];
+  // private subscribeGroup(group: keyof typeof WS_SUBSCRIPTIONS) {
+  //   const symbols = WS_SUBSCRIPTIONS[group];
 
-    if (!symbols?.length) {
+  //   if (!symbols?.length) {
+  //     this.logger.warn(`No WS subscriptions found for group: ${group}`);
+  //     return;
+  //   }
+
+  //   this.subscribe(symbols);
+  // }
+
+  private async subscribeGroup(group: keyof typeof WS_SUBSCRIPTIONS) {
+    // 1️⃣ Static subscriptions
+    const staticSymbols = WS_SUBSCRIPTIONS[group] ?? [];
+
+    // 2️⃣ Dynamic subscriptions from DB
+    const dynamicSymbols =
+      await this.tradeConfigService.getUniqueTokenExchangePairs();
+
+    // 3️⃣ Merge + Deduplicate
+    const finalSymbols = Array.from(
+      new Set([...staticSymbols, ...dynamicSymbols]),
+    );
+
+    if (!finalSymbols.length) {
       this.logger.warn(`No WS subscriptions found for group: ${group}`);
       return;
     }
 
-    this.subscribe(symbols);
+    this.logger.log(
+      `🔔 Subscribing ${finalSymbols.length} instruments [${group}]`,
+    );
+
+    this.subscribe(finalSymbols);
   }
 }
 
