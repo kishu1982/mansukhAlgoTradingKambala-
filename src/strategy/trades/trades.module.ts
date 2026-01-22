@@ -7,6 +7,7 @@ import { TradesExecutionService } from './trades-execution.service';
 import { MarketModule } from 'src/market/market.module';
 import { OrdersModule } from 'src/orders/orders.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { StoplossTargetService } from './stoploss-target/stoploss-target.service';
 
 @Module({
   imports: [
@@ -15,8 +16,12 @@ import { ScheduleModule } from '@nestjs/schedule';
     OrdersModule, // ✅ ADD THIS
     ScheduleModule.forRoot(), // TO RUN SCHEDULED JOBS FOR TRADES EXECUTION
   ],
-  providers: [TradesService, TradesExecutionService],
-  exports: [TradesService, TradesExecutionService],
+  providers: [TradesService, TradesExecutionService, StoplossTargetService], // ✅ ADD THIS
+  exports: [
+    TradesService,
+    TradesExecutionService,
+    StoplossTargetService, // optional (only if used outside)
+  ],
   controllers: [TradesController],
 })
 export class TradesModule {}

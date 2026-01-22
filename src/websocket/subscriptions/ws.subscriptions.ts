@@ -5,8 +5,9 @@ export const WS_SUBSCRIPTIONS = {
     // 'NSE|2885', // RELIANCE
     // 'NSE|1594', // INFY
     'NFO|49229', // NIFTY FUT
-    // 'MCX|472780', // GOLDM
+    'MCX|472780', // GOLDM
     // 'NFO|58751', // nifty call FUT
+    'NSE|2475', //ONGC
   ],
 
   EQUITIES: ['NSE|22', 'NSE|1594'],

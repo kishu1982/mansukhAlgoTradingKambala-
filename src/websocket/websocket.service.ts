@@ -8,6 +8,7 @@ import { TokenService } from '../token/token.service';
 import { StrategyService } from 'src/strategy/strategy.service';
 import { WS_SUBSCRIPTIONS } from './subscriptions/ws.subscriptions';
 import { TradingviewTradeConfigService } from 'src/strategy/tradingview-trade-config/tradingview-trade-config.service';
+import { StoplossTargetService } from 'src/strategy/trades/stoploss-target/stoploss-target.service';
 
 const NorenWebSocket = require('norenrestapi/lib/websocket');
 
@@ -22,6 +23,7 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
     private readonly tokenService: TokenService,
     private readonly strategyService: StrategyService,
     private readonly tradeConfigService: TradingviewTradeConfigService,
+    private readonly stoplossTargetService: StoplossTargetService,
   ) {}
 
   /* ===============================
@@ -102,6 +104,8 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
           // passing tick data to strategy module
           // 🔥 Forward tick to Strategy module
           this.strategyService.onTick(tick);
+          this.stoplossTargetService.onTick(tick);
+
           // console.log(
           //   `📈 PRICE | ${tick.e || ''}|${tick.tk || ''} | LTP: ${
           //     tick.lp
