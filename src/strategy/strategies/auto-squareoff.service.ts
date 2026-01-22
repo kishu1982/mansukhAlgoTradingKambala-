@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { OrdersService } from 'src/orders/orders.service';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AutoSquareOffService {
@@ -12,6 +13,7 @@ export class AutoSquareOffService {
    */
   private readonly SQUARE_OFF_START_TIME = '15:25';
   private readonly SQUARE_OFF_END_TIME?: string = '16:00'; // ⬅ optional (set undefined to disable)
+  private activateAutoSquareOff = true;
 
   /*
 private readonly SQUARE_OFF_START_TIME = '15:25';
@@ -19,7 +21,14 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
 
   */
 
-  constructor(private readonly orderService: OrdersService) {}
+  constructor(
+    private readonly orderService: OrdersService,
+    private readonly ConfigService: ConfigService,
+  ) {
+    this.activateAutoSquareOff =
+      this.ConfigService.get<string>('ACTIVATE_AUTO_SQUARE_OFF', 'false') ===
+      'true';
+  }
 
   // =====================================================
   // 🔹 IST TIME HELPERS (SERVER SAFE)
@@ -72,6 +81,10 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
 
   @Cron('0 */1 * * * *', { timeZone: 'Asia/Kolkata' })
   async autoSquareOff(): Promise<void> {
+    if (!this.activateAutoSquareOff) {
+      this.logger.log('Auto Square-Off is deactivated. Skipping check.');
+      return;
+    }
     if (!this.isWithinSquareOffWindow()) return;
 
     this.logger.log(
@@ -102,7 +115,7 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
 
         await this.orderService.placeOrder({
           buy_or_sell: closeSide === 'BUY' ? 'B' : 'S',
-          product_type: 'C',
+          product_type: 'I',
           exchange: pos.exch,
           tradingsymbol: pos.symname,
           quantity: closeQty,
