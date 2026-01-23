@@ -1,450 +1,520 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import * as fs from 'fs';
 import * as path from 'path';
 import { OrdersService } from 'src/orders/orders.service';
-import { TickData, SLTargetTrack } from './stoploss-target.types';
-import { calcInitialSL, trailSL } from './stoploss-target.utils';
+import { NormalizedTick } from './stoploss-target.types';
+import { ConfigService } from '@nestjs/config';
+
+interface CachedBlock<T> {
+  data: T;
+  updatedAt: number;
+}
+
+interface PositionLifecycleState {
+  observedSide: 'BUY' | 'SELL';
+  observedQty: number;
+  observedAt: number;
+
+  confirmedSide?: 'BUY' | 'SELL';
+  confirmedQty?: number;
+}
 
 @Injectable()
-export class StoplossTargetService {
+export class StoplossTargetService implements OnModuleInit {
   private readonly logger = new Logger(StoplossTargetService.name);
 
-  private readonly TRACK_FILE = path.join(
+  // ===============================
+  // 🔒 RUNTIME CACHES
+  // ===============================
+  private netPositions!: CachedBlock<any[]>;
+  private orderBook!: CachedBlock<any[]>;
+  private tradeBook!: CachedBlock<any[]>;
+
+  // ===============================
+  // 🧠 POSITION LIFECYCLE STATE
+  // ===============================
+  private positionState = new Map<string, PositionLifecycleState>();
+
+  private slPlacementLock = new Set<string>();
+
+  // ===============================
+  // 📦 INSTRUMENT MASTER
+  // ===============================
+  private instruments: any[] = [];
+
+  // ===============================
+  // ⚙️ CONFIG
+  // ===============================
+  private readonly DATA_TTL_MS = 3000;
+
+  // private readonly SL_PERCENT = Number(
+  //   process.env.STANDARD_STOPLOSS_PERCENT || 0.25,
+  // );
+  // private readonly FIRST_PROFIT_STAGE = Number(
+  //   process.env.FIRST_PROFIT_STAGE || 0.66,
+  // );
+
+  private readonly TRACK_DIR = path.join(
     process.cwd(),
-    'data/TVstopossTargetTrack/TV_SL_TGT_tracking.json',
+    'data/TVstopossTargetTrack',
   );
 
-  private readonly FATAL_FILE = path.join(
-    process.cwd(),
-    'data/TVstopossTargetTrack/TV_SL_FATAL_ERRORS.json',
-  );
-
-  private readonly instruments = JSON.parse(
-    fs.readFileSync(
-      path.join(process.cwd(), 'data/instrumentinfo/instruments.json'),
-      'utf8',
-    ),
-  );
-
-  private readonly SL_PERCENT = Number(
-    process.env.STANDARD_STOPLOSS_PERCENT || 0.25,
-  );
-  private readonly FIRST_STAGE = Number(process.env.FIRST_PROFIT_STAGE || 0.66);
-  private readonly BREAKEVEN_STAGE = Number(process.env.BREAKEVEN_STAGE || 0.8);
-  private readonly TARGET_FIRST = Number(
-    process.env.TARGET_FIRST_PERCENT || 0.25,
-  );
-
-  constructor(private readonly orderService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly ConfigService: ConfigService,
+  ) {}
 
   // =====================================================
-  // 🔹 ENTRY FROM WEBSOCKET
+  // 🚀 INIT
   // =====================================================
-  async onTick(tick: TickData): Promise<void> {
-    try {
-      if (!tick?.ls || tick.ls <= 0) return;
+  async onModuleInit() {
+    this.loadInstruments();
+    await this.refreshAllTradingData();
+    this.logger.log('✅ StoplossTargetService initialized');
+  }
 
-      const positions = await this.orderService.getNetPositions();
-      if (!Array.isArray(positions?.data)) return;
+  private get SL_PERCENT(): number {
+    return this.ConfigService.get<number>('STANDARD_STOPLOSS_PERCENT', 0.25);
+  }
 
-      const pos = positions.data.find(
-        (p) =>
-          p.token === tick.tk &&
-          p.exch === tick.e &&
-          ['I', 'M'].includes(p.prd) &&
-          Number(p.netqty) !== 0,
-      );
+  private get FIRST_PROFIT_STAGE(): number {
+    return this.ConfigService.get<number>('FIRST_PROFIT_STAGE', 0.66);
+  }
 
-      if (!pos) return;
+  // =====================================================
+  // ⏱️ DATA REFRESH
+  // =====================================================
+  @Interval(1000)
+  async refreshAllTradingData() {
+    await Promise.all([
+      this.refreshNetPositions(),
+      this.refreshOrderBook(),
+      this.refreshTradeBook(),
+    ]);
+  }
 
-      const instrument = this.instruments.find(
-        (i) => i.exchange === tick.e && i.token === tick.tk,
-      );
+  private async refreshNetPositions() {
+    const res = await this.ordersService.getNetPositions();
+    if (Array.isArray(res?.data)) {
+      this.netPositions = { data: res.data, updatedAt: Date.now() };
+    }
+  }
 
-      if (!instrument?.lotSize || !instrument?.tradingSymbol) {
-        this.logger.warn(`Instrument info missing ${tick.e}:${tick.tk}`);
-        return;
-      }
+  private async refreshOrderBook() {
+    const res = await this.ordersService.getOrderBook();
+    if (Array.isArray(res?.trades)) {
+      this.orderBook = { data: res.trades, updatedAt: Date.now() };
+    }
+  }
 
-      await this.manageSLAndTarget({
-        exchange: tick.e,
-        token: tick.tk,
-        tradingSymbol: instrument.tradingSymbol,
-        side: Number(pos.netqty) > 0 ? 'BUY' : 'SELL',
-        productType: pos.prd,
-        openPrice: Number(pos.netavgprc),
-        netQty: Number(pos.netqty),
-        lotSize: Number(instrument.lotSize),
-        ltp: tick.ls,
-      });
-    } catch (err) {
-      this.logger.error('🔥 onTick failed', err?.stack || err);
+  private async refreshTradeBook() {
+    const res = await this.ordersService.getTradeBook();
+    if (Array.isArray(res?.trades)) {
+      this.tradeBook = { data: res.trades, updatedAt: Date.now() };
     }
   }
 
   // =====================================================
-  // 🔹 CORE LOGIC
+  // 📥 INSTRUMENTS
   // =====================================================
-  private async manageSLAndTarget(data: any) {
-    try {
-      const {
-        exchange,
-        token,
-        tradingSymbol,
-        side,
-        productType,
-        openPrice,
-        netQty,
-        lotSize,
-        ltp,
-      } = data;
-
-      this.ensureTrackingFile();
-
-      let track = this.readTrack(exchange, token);
-      const openLots = Math.abs(netQty) / lotSize;
-
-      // =====================================================
-      // 🔹 STEP 1: CHECK EXISTING PENDING SL (TOKEN BASED)
-      // =====================================================
-      const pendingSL = await this.findPendingSL(exchange, token);
-
-      // =====================================================
-      // 🔹 STEP 2: CREATE INITIAL SL USING LTP (ONLY ONCE)
-      // =====================================================
-      if (!pendingSL && !track) {
-        const sl =
-          side === 'BUY'
-            ? ltp * (1 - this.SL_PERCENT)
-            : ltp * (1 + this.SL_PERCENT);
-
-        const slOrderId = await this.ensureStoplossExists(
-          exchange,
-          tradingSymbol,
-          side,
-          productType,
-          Math.abs(netQty),
-          sl,
-        );
-
-        if (!slOrderId) return;
-
-        track = {
-          exchange,
-          token,
-          tradingSymbol,
-          side,
-          productType,
-          openPrice,
-          lotSize,
-          initialLots: openLots,
-          closedLots: 0,
-          netQty,
-          slTriggerPrice: sl,
-          slOrderId,
-          stage: 'INITIAL',
-          lastAction: 'INITIAL_SL_PLACED',
-          targetActions: [],
-          updatedAt: new Date().toISOString(),
-        };
-
-        this.saveTrack(track);
-        this.logger.log(`🛑 Initial SL placed @ ${sl}`);
-        return; // ⛔ VERY IMPORTANT (no trailing in same tick)
-      }
-
-      if (!track || !pendingSL) return;
-
-      // =====================================================
-      // 🔹 PROFIT CALCULATION (FIXED)
-      // =====================================================
-      const profitPercent =
-        side === 'BUY'
-          ? (ltp - openPrice) / openPrice
-          : (openPrice - ltp) / openPrice;
-
-      // =====================================================
-      // 🔹 BREAKEVEN MOVE
-      // =====================================================
-      if (
-        profitPercent >= this.BREAKEVEN_STAGE &&
-        track.stage !== 'BREAKEVEN'
-      ) {
-        track.slTriggerPrice = openPrice;
-        track.stage = 'BREAKEVEN';
-        track.lastAction = 'SL_TO_BREAKEVEN';
-
-        await this.safeModifySL(track, exchange, tradingSymbol);
-      }
-
-      // =====================================================
-      // 🔹 FIRST PROFIT TRAIL
-      // =====================================================
-      else if (profitPercent >= this.FIRST_STAGE && track.stage === 'INITIAL') {
-        const trailValue = openPrice * this.SL_PERCENT * this.FIRST_STAGE;
-        track.slTriggerPrice = trailSL(ltp, side, trailValue);
-        track.stage = 'FIRST_PROFIT';
-        track.lastAction = 'FIRST_PROFIT_TRAIL';
-
-        await this.safeModifySL(track, exchange, tradingSymbol);
-      }
-
-      // =====================================================
-      // 🔹 TARGET LOGIC (UNCHANGED)
-      // =====================================================
-      const maxClosableLots = Math.floor(track.initialLots / 2);
-      const remainingAllowed = maxClosableLots - track.closedLots;
-
-      if (
-        openLots > 1 &&
-        remainingAllowed > 0 &&
-        Math.abs(ltp - openPrice) >= openPrice * this.TARGET_FIRST
-      ) {
-        const lotsToClose = Math.min(
-          Math.floor(openLots / 2),
-          remainingAllowed,
-        );
-
-        if (lotsToClose >= 1) {
-          const closeQty = lotsToClose * lotSize;
-
-          const orderId = await this.orderService.placeOrder({
-            buy_or_sell: side === 'BUY' ? 'S' : 'B',
-            product_type: this.normalizeProductType(productType),
-            exchange,
-            tradingsymbol: tradingSymbol,
-            quantity: closeQty,
-            price_type: 'MKT',
-            price: 0,
-            retention: 'DAY',
-            amo: 'NO',
-            remarks: 'TARGET_50_PERCENT_BOOKING',
-          });
-
-          track.closedLots += lotsToClose;
-          track.netQty =
-            side === 'BUY' ? track.netQty - closeQty : track.netQty + closeQty;
-
-          const extractedOrderId = this.extractOrderNo(orderId);
-
-          if (extractedOrderId) {
-            track.targetActions.push({
-              orderId: extractedOrderId,
-              closedLots: lotsToClose,
-              remainingLots: track.initialLots - track.closedLots,
-              price: ltp,
-              time: new Date().toISOString(),
-            });
-          }
-
-          await this.safeModifySL(track, exchange, tradingSymbol);
-          track.lastAction = 'TARGET_50_PERCENT_BOOKED';
-        }
-      }
-
-      track.updatedAt = new Date().toISOString();
-      this.saveTrack(track);
-    } catch (err) {
-      this.logger.error('🔥 SL/Target execution failed', err?.stack || err);
-    }
-  }
-
-  // =====================================================
-  // 🔹 SAFE SL MODIFY / RECREATE
-  // =====================================================
-  private async safeModifySL(
-    track: SLTargetTrack,
-    exchange: string,
-    tradingSymbol: string,
-  ) {
-    const pendingSL = await this.findPendingSL(exchange, track.token);
-
-    if (!pendingSL) {
-      const sl = await this.ensureStoplossExists(
-        exchange,
-        tradingSymbol,
-        track.side,
-        track.productType,
-        Math.abs(track.netQty),
-        track.slTriggerPrice,
-      );
-      if (!sl) return;
-      track.slOrderId = sl;
-    }
-
-    await this.modifyStoplossOrder(
-      track.slOrderId!,
-      exchange,
-      tradingSymbol,
-      track.netQty,
-      track.slTriggerPrice,
+  private loadInstruments() {
+    this.instruments = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), 'data/instrumentinfo/instruments.json'),
+        'utf8',
+      ),
     );
   }
 
   // =====================================================
-  // 🔹 ORDER HELPERS
+  // 📡 ENTRY FROM WEBSOCKET
   // =====================================================
-  private async ensureStoplossExists(
-    exchange: string,
-    tradingSymbol: string,
-    side: 'BUY' | 'SELL',
-    productType: string,
-    qty: number,
-    trigger: number,
-  ): Promise<string | null> {
-    for (let i = 1; i <= 3; i++) {
-      const pending = await this.findPendingSL(exchange, tradingSymbol);
-      if (pending) return pending;
+  async onTick(rawTick: any) {
+    // this.logger.log(` current sl percent value : ${this.SL_PERCENT}`);
+    // this.logger.log(` current first profit stage value : ${this.FIRST_PROFIT_STAGE}`);
+    const tick = this.normalizeTick(rawTick);
+    if (!tick) return;
+    if (!this.isCacheFresh()) return;
+
+    const position = this.findMatchingOpenPosition(tick);
+    const pendingSL = this.findPendingSL(tick);
+
+    // ============================
+    // CASE-A: POSITION CLOSED
+    // ============================
+    if (!position && pendingSL) {
+      await this.cancelPendingSL(pendingSL, 'NET_POSITION_CLOSED');
+      return;
+    }
+
+    if (!position) return;
+
+    const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
+    const qty = Math.abs(Number(position.netqty));
+
+    // ============================
+    // 🔥 STABILITY + FLIP CHECK
+    // ============================
+    const posCheck = this.checkPositionStabilityAndFlip(tick.tk, side, qty);
+
+    if (!posCheck.stable) return;
+
+    if (pendingSL && posCheck.flipped) {
+      await this.cancelPendingSL(pendingSL, 'POSITION_FLIPPED_REVERSE_SIDE');
+      return; // fresh SL on next tick
+    }
+
+    const instrument = this.findInstrument(tick);
+    if (!instrument) return;
+
+    await this.processRisk({
+      tick,
+      position,
+      instrument,
+      pendingSL,
+    });
+  }
+
+  // =====================================================
+  // 🧠 CORE LOGIC — STEP-2
+  // =====================================================
+  private async processRisk({
+    tick,
+    position,
+    instrument,
+    pendingSL,
+  }: {
+    tick: NormalizedTick;
+    position: any;
+    instrument: any;
+    pendingSL: any | null;
+  }) {
+    const ltp = tick.lp;
+    const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
+    const qty = Math.abs(Number(position.netqty));
+
+    // =====================================================
+    // STEP-2 — INITIAL SL
+    // =====================================================
+    if (!pendingSL) {
+      if (this.slPlacementLock.has(tick.tk)) return;
+      this.slPlacementLock.add(tick.tk);
 
       try {
-        const res = await this.orderService.placeOrder({
+        const trigger =
+          side === 'BUY'
+            ? ltp * (1 - this.SL_PERCENT)
+            : ltp * (1 + this.SL_PERCENT);
+
+        const res = await this.ordersService.placeOrder({
           buy_or_sell: side === 'BUY' ? 'S' : 'B',
-          product_type: this.normalizeProductType(productType),
-          exchange,
-          tradingsymbol: tradingSymbol,
+          product_type: position.prd,
+          exchange: tick.e,
+          tradingsymbol: instrument.tradingSymbol,
           quantity: qty,
           price_type: 'SL-MKT',
           price: 0,
           trigger_price: trigger,
           retention: 'DAY',
           amo: 'NO',
-          remarks: 'AUTO_SL',
+          remarks: 'AUTO_INITIAL_SL',
         });
 
-        const ord = this.extractOrderNo(res);
-        if (ord) return ord;
-      } catch (e) {
-        this.logger.error(`SL create attempt ${i} failed`, e);
+        const orderId = this.extractOrderNo(res);
+        if (!orderId) return;
+
+        this.appendOrderLog(orderId, {
+          action: 'INITIAL_SL_PLACED',
+          side,
+          stage: 'STANDARD',
+          trigger,
+          openPrice: Number(position.netavgprc),
+          highestPrice: side === 'BUY' ? ltp : undefined,
+          lowestPrice: side === 'SELL' ? ltp : undefined,
+          qty,
+        });
+
+        this.logger.log(`✅ Initial SL placed | ${tick.tk} | ${trigger}`);
+      } finally {
+        setTimeout(() => this.slPlacementLock.delete(tick.tk), 1200);
       }
+
+      return;
     }
 
-    this.logFatalSLFailure(exchange, tradingSymbol, qty, trigger);
-    return null;
-  }
+    // =====================================================
+    // STEP-3 + STEP-4 — TRAILING WITH FIRST PROFIT STAGE
+    // =====================================================
+    const orderId = this.extractOrderNo(pendingSL.orderno || pendingSL);
+    if (!orderId) return;
 
-  private async modifyStoplossOrder(
-    orderId: any,
-    exchange: string,
-    tradingSymbol: string,
-    netQty: number,
-    trigger: number,
-  ) {
-    try {
-      const ordNo = this.extractOrderNo(orderId);
-      if (!ordNo) return;
+    const track = this.readOrderTrack(orderId);
+    if (!track.length) return;
 
-      await this.orderService.modifyOrder({
-        orderno: ordNo,
-        exchange,
-        tradingsymbol: tradingSymbol,
-        quantity: Math.abs(netQty),
-        newprice_type: 'SL-MKT',
-        newprice: 0,
-        newtrigger_price: trigger,
-      });
+    const state = this.deriveTrailingState(track);
+    if (!state) return;
 
-      this.logger.log(`✏️ SL modified | ${ordNo}`);
-    } catch (err) {
-      this.logger.error('Modify SL failed', err?.stack || err);
+    const { openPrice, currentSL, highestPrice, lowestPrice, stage } = state;
+
+    const standardDiff = openPrice * this.SL_PERCENT;
+    const firstProfitDiff = standardDiff * this.FIRST_PROFIT_STAGE;
+
+    let activeDiff = standardDiff;
+    let nextStage: 'STANDARD' | 'FIRST_PROFIT' | null = null;
+
+    // =====================================================
+    // FIRST PROFIT STAGE CHECK (ONE TIME)
+    // =====================================================
+    if (
+      stage === 'STANDARD' &&
+      ((side === 'BUY' && ltp >= openPrice + firstProfitDiff) ||
+        (side === 'SELL' && ltp <= openPrice - firstProfitDiff))
+    ) {
+      activeDiff = firstProfitDiff;
+      nextStage = 'FIRST_PROFIT';
     }
+
+    if (stage === 'FIRST_PROFIT') {
+      activeDiff = firstProfitDiff;
+    }
+
+    let newExtreme: number;
+    let newSL: number;
+
+    if (side === 'BUY') {
+      newExtreme = Math.max(highestPrice ?? openPrice, ltp);
+      if (newExtreme <= (highestPrice ?? openPrice)) return;
+
+      newSL = newExtreme - activeDiff;
+      if (newSL <= currentSL) return;
+    } else {
+      newExtreme = Math.min(lowestPrice ?? openPrice, ltp);
+      if (newExtreme >= (lowestPrice ?? openPrice)) return;
+
+      newSL = newExtreme + activeDiff;
+      if (newSL >= currentSL) return;
+    }
+
+    // =====================================================
+    // MODIFY SL
+    // =====================================================
+    await this.modifyStoploss(
+      orderId,
+      tick.e,
+      instrument.tradingSymbol,
+      qty,
+      newSL,
+    );
+
+    // =====================================================
+    // JSON LOG (EVENT-BASED)
+    // =====================================================
+    this.appendOrderLog(orderId, {
+      action: 'SL_TRAILED',
+      side,
+      stage: nextStage ?? stage,
+      previousSL: currentSL,
+      newSL,
+      highestPrice: side === 'BUY' ? newExtreme : undefined,
+      lowestPrice: side === 'SELL' ? newExtreme : undefined,
+    });
+
+    this.logger.log(`📈 SL trailed | ${tick.tk} | ${currentSL} → ${newSL}`);
   }
 
-  // finding pending stoploss running in market or not
   // =====================================================
-  // 🔹 ORDER HELPERS (UNCHANGED)
+  // 🔥 POSITION STABILITY + FLIP (CORE FIX)
   // =====================================================
-  private async findPendingSL(
-    exchange: string,
+  private checkPositionStabilityAndFlip(
     token: string,
-  ): Promise<any | null> {
-    const ob = await this.orderService.getOrderBook();
-    if (!Array.isArray(ob?.trades)) return null;
+    side: 'BUY' | 'SELL',
+    qty: number,
+    delayMs = 800,
+  ): { stable: boolean; flipped: boolean } {
+    const now = Date.now();
+    const state = this.positionState.get(token);
 
+    if (!state) {
+      this.positionState.set(token, {
+        observedSide: side,
+        observedQty: qty,
+        observedAt: now,
+      });
+      return { stable: false, flipped: false };
+    }
+
+    if (state.observedSide !== side || state.observedQty !== qty) {
+      state.observedSide = side;
+      state.observedQty = qty;
+      state.observedAt = now;
+      return { stable: false, flipped: false };
+    }
+
+    if (now - state.observedAt < delayMs) {
+      return { stable: false, flipped: false };
+    }
+
+    const flipped =
+      state.confirmedSide !== undefined && state.confirmedSide !== side;
+
+    state.confirmedSide = side;
+    state.confirmedQty = qty;
+
+    return { stable: true, flipped };
+  }
+
+  // =====================================================
+  // 🔎 HELPERS
+  // =====================================================
+  private normalizeTick(raw: any): NormalizedTick | null {
+    const lp = Number(raw?.lp);
+    if (!raw || !raw.tk || !raw.e || !Number.isFinite(lp) || lp <= 0)
+      return null;
+    return { tk: raw.tk, e: raw.e, lp };
+  }
+
+  private isCacheFresh(): boolean {
+    const now = Date.now();
     return (
-      ob.trades.find(
-        (o) =>
-          o.exch === exchange &&
-          o.token === token &&
-          o.prctyp === 'SL-MKT' &&
-          o.status === 'TRIGGER_PENDING',
-      ) || null
+      now - this.netPositions?.updatedAt < this.DATA_TTL_MS &&
+      now - this.orderBook?.updatedAt < this.DATA_TTL_MS &&
+      now - this.tradeBook?.updatedAt < this.DATA_TTL_MS
     );
   }
 
+  private findMatchingOpenPosition(tick: NormalizedTick) {
+    return this.netPositions.data.find(
+      (p) => p.token === tick.tk && p.exch === tick.e && Number(p.netqty) !== 0,
+    );
+  }
+
+  private findPendingSL(tick: NormalizedTick) {
+    return this.orderBook.data.find(
+      (o) =>
+        o.token === tick.tk &&
+        o.exch === tick.e &&
+        o.prctyp === 'SL-MKT' &&
+        o.status === 'TRIGGER_PENDING',
+    );
+  }
+
+  private findInstrument(tick: NormalizedTick) {
+    return this.instruments.find(
+      (i) => i.exchange === tick.e && i.token === tick.tk,
+    );
+  }
+
+  private extractOrderNo(o: any): string | null {
+    if (!o) return null;
+    if (typeof o === 'string') return o;
+    if (o.norenordno) return o.norenordno;
+    return null;
+  }
+
+  private async cancelPendingSL(
+    order: any,
+    reason: 'NET_POSITION_CLOSED' | 'POSITION_FLIPPED_REVERSE_SIDE',
+  ) {
+    const orderId = this.extractOrderNo(order.orderno || order);
+    if (!orderId) return;
+
+    await this.ordersService.cancelOrder(orderId);
+
+    this.appendOrderLog(orderId, {
+      action: 'SL_CANCELLED',
+      reason,
+    });
+
+    this.logger.warn(`🛑 SL cancelled | ${orderId} | ${reason}`);
+  }
+
+  private appendOrderLog(orderId: string, payload: any) {
+    if (!fs.existsSync(this.TRACK_DIR))
+      fs.mkdirSync(this.TRACK_DIR, { recursive: true });
+
+    const file = path.join(this.TRACK_DIR, `${orderId}.json`);
+    const data = fs.existsSync(file)
+      ? JSON.parse(fs.readFileSync(file, 'utf8'))
+      : [];
+
+    data.push({ ...payload, time: new Date().toISOString() });
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  }
+
   // =====================================================
-  // 🔹 FILE HELPERS
+  // 🛠️ 3rd step mainking stoploss trails logic helper
   // =====================================================
-  private ensureTrackingFile() {
-    const dir = path.dirname(this.TRACK_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    if (!fs.existsSync(this.TRACK_FILE))
-      fs.writeFileSync(this.TRACK_FILE, '[]');
-  }
 
-  private readTrack(exchange: string, token: string): SLTargetTrack | null {
-    try {
-      const data = JSON.parse(fs.readFileSync(this.TRACK_FILE, 'utf8'));
-      return (
-        data.find((d) => d.exchange === exchange && d.token === token) || null
-      );
-    } catch {
-      return null;
-    }
+  // 1️⃣ ADD THIS HELPER (READ TRACK FILE)
+  private readOrderTrack(orderId: string): any[] {
+    const file = path.join(this.TRACK_DIR, `${orderId}.json`);
+    if (!fs.existsSync(file)) return [];
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
   }
-
-  private saveTrack(track: SLTargetTrack) {
-    try {
-      let data: SLTargetTrack[] = [];
-      if (fs.existsSync(this.TRACK_FILE)) {
-        data = JSON.parse(fs.readFileSync(this.TRACK_FILE, 'utf8'));
-      }
-      const i = data.findIndex(
-        (d) => d.exchange === track.exchange && d.token === track.token,
-      );
-      if (i >= 0) data[i] = track;
-      else data.push(track);
-      fs.writeFileSync(this.TRACK_FILE, JSON.stringify(data, null, 2));
-    } catch (err) {
-      this.logger.error('Failed to save SL tracking file', err);
-    }
-  }
-
-  private logFatalSLFailure(
+  //2️⃣ ADD THIS HELPER (MODIFY SL)
+  private async modifyStoploss(
+    orderId: string,
     exchange: string,
     tradingSymbol: string,
     qty: number,
     trigger: number,
   ) {
-    const entry = {
+    await this.ordersService.modifyOrder({
+      orderno: orderId,
       exchange,
-      tradingSymbol,
-      qty,
-      trigger,
-      time: new Date().toISOString(),
-    };
+      tradingsymbol: tradingSymbol,
+      quantity: qty,
+      newprice_type: 'SL-MKT',
+      newprice: 0,
+      newtrigger_price: trigger,
+    });
+  }
 
-    let data: any[] = [];
-    if (fs.existsSync(this.FATAL_FILE)) {
-      data = JSON.parse(fs.readFileSync(this.FATAL_FILE, 'utf8'));
+  // helper to add state derivation helper
+  private deriveTrailingState(track: any[]): {
+    openPrice: number;
+    currentSL: number;
+    highestPrice?: number;
+    lowestPrice?: number;
+    stage: 'STANDARD' | 'FIRST_PROFIT';
+  } | null {
+    let openPrice: number | undefined;
+    let currentSL: number | undefined;
+    let highestPrice: number | undefined;
+    let lowestPrice: number | undefined;
+    let stage: 'STANDARD' | 'FIRST_PROFIT' = 'STANDARD';
+
+    for (const entry of track) {
+      if (entry.openPrice && openPrice === undefined) {
+        openPrice = entry.openPrice;
+      }
+
+      if (entry.trigger && currentSL === undefined) {
+        currentSL = entry.trigger;
+      }
+
+      if (typeof entry.newSL === 'number') {
+        currentSL = entry.newSL;
+      }
+
+      if (typeof entry.highestPrice === 'number') {
+        highestPrice = entry.highestPrice;
+      }
+
+      if (typeof entry.lowestPrice === 'number') {
+        lowestPrice = entry.lowestPrice;
+      }
+
+      if (entry.stage === 'FIRST_PROFIT') {
+        stage = 'FIRST_PROFIT';
+      }
     }
 
-    data.push(entry);
-    fs.writeFileSync(this.FATAL_FILE, JSON.stringify(data, null, 2));
-  }
+    if (openPrice === undefined || currentSL === undefined) {
+      return null;
+    }
 
-  // =====================================================
-  // 🔹 UTILS
-  // =====================================================
-  private extractOrderNo(orderId: any): string | null {
-    if (!orderId) return null;
-    if (typeof orderId === 'string') return orderId;
-    if (typeof orderId === 'object' && orderId.norenordno)
-      return orderId.norenordno;
-    return null;
-  }
-
-  private normalizeProductType(prd: string): 'I' | 'M' | 'C' | 'H' {
-    if (['I', 'M', 'C', 'H'].includes(prd)) return prd as any;
-    return 'I';
+    return { openPrice, currentSL, highestPrice, lowestPrice, stage };
   }
 }

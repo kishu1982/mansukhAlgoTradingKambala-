@@ -1068,9 +1068,9 @@ export class OrdersService {
 
       const response = await api.get_positions();
 
-      this.logger.debug(
-        `📥 get_positions response: ${JSON.stringify(response)}`,
-      );
+      // this.logger.debug(
+      //   `📥 get_positions response: ${JSON.stringify(response)}`,
+      // );
 
       // ✅ Noren "no data" is NOT an error
       if (

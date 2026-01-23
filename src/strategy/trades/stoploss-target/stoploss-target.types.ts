@@ -5,6 +5,14 @@ export interface TickData {
   ls?: number;
 }
 
+export interface NormalizedTick {
+  tk: string;
+  e: string;
+  lp: number; // ✅ guaranteed number
+  ft?: number;
+}
+
+
 export interface SLTargetTrack {
   exchange: string;
   token: string;
