@@ -72,14 +72,38 @@ export class StoplossTargetService implements OnModuleInit {
     this.loadInstruments();
     await this.refreshAllTradingData();
     this.logger.log('✅ StoplossTargetService initialized');
+    this.logger.log(
+      `📊 SL config | SL_PERCENT=${this.SL_PERCENT} | FIRST_PROFIT_STAGE=${this.FIRST_PROFIT_STAGE}`,
+    );
   }
-
+  //defining getters for config values
   private get SL_PERCENT(): number {
-    return this.ConfigService.get<number>('STANDARD_STOPLOSS_PERCENT', 0.25);
+    const raw = this.ConfigService.get<string>(
+      'STANDARD_STOPLOSS_PERCENT',
+      '0.25',
+    );
+
+    const value = Number(raw);
+
+    if (Number.isNaN(value)) {
+      throw new Error(`Invalid STANDARD_STOPLOSS_PERCENT value: ${raw}`);
+    }
+
+    // allow 25 or 0.25
+    return value > 1 ? value / 100 : value;
   }
 
   private get FIRST_PROFIT_STAGE(): number {
-    return this.ConfigService.get<number>('FIRST_PROFIT_STAGE', 0.66);
+    const raw = this.ConfigService.get<string>('FIRST_PROFIT_STAGE', '0.66');
+
+    const value = Number(raw);
+
+    if (Number.isNaN(value)) {
+      throw new Error(`Invalid FIRST_PROFIT_STAGE value: ${raw}`);
+    }
+
+    // allow 66 or 0.66
+    return value > 1 ? value / 100 : value;
   }
 
   // =====================================================
@@ -132,7 +156,9 @@ export class StoplossTargetService implements OnModuleInit {
   // =====================================================
   async onTick(rawTick: any) {
     // this.logger.log(` current sl percent value : ${this.SL_PERCENT}`);
-    // this.logger.log(` current first profit stage value : ${this.FIRST_PROFIT_STAGE}`);
+    // this.logger.log(
+    //   ` current first profit stage value : ${this.FIRST_PROFIT_STAGE}`,
+    // );
     const tick = this.normalizeTick(rawTick);
     if (!tick) return;
     if (!this.isCacheFresh()) return;
@@ -202,11 +228,19 @@ export class StoplossTargetService implements OnModuleInit {
       this.slPlacementLock.add(tick.tk);
 
       try {
+        // 🔥 ALWAYS USE MARKET PRICE SCALE
+        const entryPrice = ltp; // tick.lp is true traded price
+        const openPrice = Number(position.netavgprc);
+
+
         const trigger =
           side === 'BUY'
-            ? ltp * (1 - this.SL_PERCENT)
-            : ltp * (1 + this.SL_PERCENT);
+            ? entryPrice * (1 - this.SL_PERCENT)
+            : entryPrice * (1 + this.SL_PERCENT);
 
+        this.logger.log(
+          `DEBUG SL | open=${entryPrice} | SL_PERCENT=${this.SL_PERCENT} | calculated trigger=${trigger}`,
+        );
         const res = await this.ordersService.placeOrder({
           buy_or_sell: side === 'BUY' ? 'S' : 'B',
           product_type: position.prd,
@@ -224,16 +258,25 @@ export class StoplossTargetService implements OnModuleInit {
         const orderId = this.extractOrderNo(res);
         if (!orderId) return;
 
-        this.appendOrderLog(orderId, {
-          action: 'INITIAL_SL_PLACED',
-          side,
-          stage: 'STANDARD',
-          trigger,
-          openPrice: Number(position.netavgprc),
-          highestPrice: side === 'BUY' ? ltp : undefined,
-          lowestPrice: side === 'SELL' ? ltp : undefined,
-          qty,
-        });
+  const standardDiff = entryPrice * this.SL_PERCENT;
+
+  this.appendOrderLog(orderId, {
+    action: 'INITIAL_SL_PLACED',
+    side,
+    stage: 'STANDARD',
+
+    trigger,
+    openPrice,
+    entryPrice,
+
+    slPercentUsed: this.SL_PERCENT,
+    slDiffUsed: standardDiff,
+
+    highestPrice: side === 'BUY' ? entryPrice : undefined,
+    lowestPrice: side === 'SELL' ? entryPrice : undefined,
+    qty,
+  });
+
 
         this.logger.log(`✅ Initial SL placed | ${tick.tk} | ${trigger}`);
       } finally {
@@ -310,15 +353,27 @@ export class StoplossTargetService implements OnModuleInit {
     // =====================================================
     // JSON LOG (EVENT-BASED)
     // =====================================================
-    this.appendOrderLog(orderId, {
-      action: 'SL_TRAILED',
-      side,
-      stage: nextStage ?? stage,
-      previousSL: currentSL,
-      newSL,
-      highestPrice: side === 'BUY' ? newExtreme : undefined,
-      lowestPrice: side === 'SELL' ? newExtreme : undefined,
-    });
+const appliedStage = nextStage ?? stage;
+const slPercentUsed =
+  appliedStage === 'FIRST_PROFIT'
+    ? this.SL_PERCENT * this.FIRST_PROFIT_STAGE
+    : this.SL_PERCENT;
+
+this.appendOrderLog(orderId, {
+  action: 'SL_TRAILED',
+  side,
+  stage: appliedStage,
+
+  previousSL: currentSL,
+  newSL,
+
+  slPercentUsed,
+  slDiffUsed: activeDiff,
+
+  highestPrice: side === 'BUY' ? newExtreme : undefined,
+  lowestPrice: side === 'SELL' ? newExtreme : undefined,
+});
+
 
     this.logger.log(`📈 SL trailed | ${tick.tk} | ${currentSL} → ${newSL}`);
   }
