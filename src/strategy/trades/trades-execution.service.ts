@@ -98,6 +98,55 @@ export class TradesExecutionService {
   }
 
   // =====================================================
+  // 🔹 CANCEL ALL PENDING ORDERS FOR TOKEN (orderno only)
+  // =====================================================
+  private async cancelPendingOrdersForToken(
+    token: string,
+    exchange: string,
+  ): Promise<void> {
+    let orderBook: any[] = [];
+
+    try {
+      const res = await this.orderService.getOrderBook();
+      orderBook = Array.isArray(res?.trades) ? res.trades : [];
+    } catch (err) {
+      this.logger.error('❌ Failed to fetch order book', err?.stack);
+      return;
+    }
+
+    const cancellableStatuses = new Set(['OPEN', 'PENDING', 'TRIGGER_PENDING']);
+
+    const pendingOrders = orderBook.filter(
+      (o) =>
+        o.token === token &&
+        o.exch === exchange &&
+        cancellableStatuses.has(o.status),
+    );
+
+    if (!pendingOrders.length) return;
+
+    this.logger.warn(
+      `🧹 Cancelling ${pendingOrders.length} pending orders | ${exchange}:${token}`,
+    );
+
+    for (const order of pendingOrders) {
+      try {
+        await this.orderService.cancelOrder(order.orderno);
+
+        this.logger.log(`❌ Cancelled order ${order.orderno}`);
+      } catch (err) {
+        this.logger.error(
+          `❌ Failed to cancel order ${order.orderno}`,
+          err?.stack,
+        );
+      }
+    }
+
+    // let OMS settle
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  // =====================================================
   // 🔹 NET POSITION (AGGREGATED)
   // =====================================================
   private async getAggregatedNetPosition(
@@ -262,6 +311,9 @@ Any qty → qty 0	Close all	PLACED
     this.logger.log(
       `📌 Executing trade | ${trade.exchange}:${trade.token} | side=${trade.side} | lots=${trade.quantityLots}`,
     );
+
+    // 🧹 STEP 0: Cancel pending orders for same token
+    await this.cancelPendingOrdersForToken(trade.token, trade.exchange);
 
     // 1️⃣ SECURITY INFO (MANDATORY)
     const security = await this.marketService.getSecurityInfo({
