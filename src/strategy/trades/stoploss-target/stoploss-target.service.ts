@@ -69,17 +69,17 @@ export class StoplossTargetService implements OnModuleInit {
   // 🚀 INIT
   // =====================================================
   async onModuleInit() {
-    try{
+    try {
       this.loadInstruments();
       await this.refreshAllTradingData();
       this.logger.log('✅ StoplossTargetService initialized');
-    }catch(e){
+    } catch (e) {
       this.logger.error(
         '⚠️ StoplossTargetService started with partial failure',
         e?.message,
       );
     }
-    
+
     this.logger.log(
       `📊 SL config | SL_PERCENT=${this.SL_PERCENT} | FIRST_PROFIT_STAGE=${this.FIRST_PROFIT_STAGE}`,
     );
@@ -290,6 +290,18 @@ export class StoplossTargetService implements OnModuleInit {
       }
 
       return;
+    }
+
+    // =====================================================
+    // STEP-2.5 — SYNC SL QUANTITY WITH POSITION
+    // =====================================================
+    if (pendingSL) {
+      await this.syncStoplossQuantityWithPosition(
+        tick,
+        position,
+        instrument,
+        pendingSL,
+      );
     }
 
     // =====================================================
@@ -576,5 +588,81 @@ export class StoplossTargetService implements OnModuleInit {
     }
 
     return { openPrice, currentSL, highestPrice, lowestPrice, stage };
+  }
+
+  //HELPER: EXTRACT SL QTY & SIDE for managing missed qty cases
+  private getSLOrderQty(order: any): number | null {
+    if (!order) return null;
+
+    const qty = order.qty ?? order.quantity ?? order.trdqty ?? order.fillshares;
+
+    return qty ? Math.abs(Number(qty)) : null;
+  }
+  private getSLTriggerPrice(order: any): number | null {
+    return (
+      Number(order.trigprc) ||
+      Number(order.trigger_price) ||
+      Number(order.trgprc) ||
+      null
+    );
+  }
+
+  //MAIN FUNCTION (CORE REQUIREMENT) TO SYNC SL QTY WITH POSITION QTY
+  private async syncStoplossQuantityWithPosition(
+    tick: NormalizedTick,
+    position: any,
+    instrument: any,
+    pendingSL: any,
+  ) {
+    try {
+      if (!position || !pendingSL) return;
+
+      const netQty = Math.abs(Number(position.netqty));
+      if (netQty <= 0) return;
+
+      const slQty = this.getSLOrderQty(pendingSL);
+      if (!slQty) return;
+
+      // No mismatch → nothing to do
+      if (slQty === netQty) return;
+
+      const orderId = this.extractOrderNo(pendingSL.orderno || pendingSL);
+      if (!orderId) return;
+
+      const trigger = this.getSLTriggerPrice(pendingSL);
+      if (!trigger) {
+        this.logger.error(
+          `❌ Cannot sync SL qty | trigger price missing | order=${orderId}`,
+        );
+        return;
+      }
+
+      this.logger.warn(
+        `⚠️ SL qty mismatch | token=${tick.tk} | SL=${slQty} | POS=${netQty}`,
+      );
+
+      await this.ordersService.modifyOrder({
+        orderno: orderId,
+        exchange: tick.e,
+        tradingsymbol: instrument.tradingSymbol,
+        quantity: netQty,
+        newprice_type: 'SL-MKT',
+        newprice: 0,
+        newtrigger_price: trigger, // 🔥 REQUIRED
+      });
+
+      this.appendOrderLog(orderId, {
+        action: 'SL_QTY_SYNCED',
+        previousQty: slQty,
+        newQty: netQty,
+        triggerPrice: trigger,
+      });
+
+      this.logger.log(
+        `✅ SL quantity synced | order=${orderId} | ${slQty} → ${netQty}`,
+      );
+    } catch (err) {
+      this.logger.error('❌ Failed to sync SL quantity', err);
+    }
   }
 }
