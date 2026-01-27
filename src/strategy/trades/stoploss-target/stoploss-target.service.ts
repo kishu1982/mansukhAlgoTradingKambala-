@@ -255,7 +255,11 @@ export class StoplossTargetService implements OnModuleInit {
         );
 
         // calculate limit price based on trigger and buffer pct
-        const limitPrice = this.calculateSLLimitPrice(trigger, side);
+        const limitPrice = this.calculateSLLimitPrice(
+          trigger,
+          side,
+          instrument, // ✅ ADD
+        );
 
         this.logger.log(
           `DEBUG SL | open=${entryPrice} | SL_PERCENT=${this.SL_PERCENT} | limit price =${limitPrice}| calculated trigger=${trigger}`,
@@ -381,6 +385,7 @@ export class StoplossTargetService implements OnModuleInit {
       qty,
       normalizedSL,
       side, // ✅ REQUIRED
+      instrument, // ✅ ADD
     );
 
     // =====================================================
@@ -547,9 +552,14 @@ export class StoplossTargetService implements OnModuleInit {
     qty: number,
     trigger: number,
     side: 'BUY' | 'SELL', // ✅ ADD THIS
+    instrument: any, // ✅ ADD
   ) {
     // calculating limit price based on trigger and buffer pct
-    const limitPrice = this.calculateSLLimitPrice(trigger, side);
+    const limitPrice = this.calculateSLLimitPrice(
+      trigger,
+      side,
+      instrument, // ✅ ADD
+    );
     await this.ordersService.modifyOrder({
       orderno: orderId,
       exchange,
@@ -671,7 +681,11 @@ export class StoplossTargetService implements OnModuleInit {
       );
       // finding side and making limit price based on trigger price
       const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
-      const limitPrice = this.calculateSLLimitPrice(normalizedTrigger, side);
+     const limitPrice = this.calculateSLLimitPrice(
+       normalizedTrigger,
+       side,
+       instrument, // ✅ ADD
+     );
 
       await this.ordersService.modifyOrder({
         orderno: orderId,
@@ -762,13 +776,14 @@ export class StoplossTargetService implements OnModuleInit {
   private calculateSLLimitPrice(
     triggerPrice: number,
     side: 'BUY' | 'SELL',
+    instrument: any, // ✅ ADD
   ): number {
     const buffer = triggerPrice * this.SL_LIMIT_PCT;
 
-    const price =
+    const rawPrice =
       side === 'SELL' ? triggerPrice - buffer : triggerPrice + buffer;
 
-    // round to 2 decimals for safety
-    return Number(price.toFixed(2));
+    // 🔥 normalize to tick size again using to redefind limit prices like trigger price as per tick size
+    return this.normalizeTriggerPrice(rawPrice, instrument, side);
   }
 }
