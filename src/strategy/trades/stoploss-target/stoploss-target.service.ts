@@ -23,6 +23,9 @@ interface PositionLifecycleState {
 @Injectable()
 export class StoplossTargetService implements OnModuleInit {
   private readonly logger = new Logger(StoplossTargetService.name);
+  private readonly SL_LIMIT_PCT = Number(
+    process.env.SL_LIMIT_PRICE_PCT || 0.01,
+  );
 
   // ===============================
   // 🔒 RUNTIME CACHES
@@ -251,8 +254,11 @@ export class StoplossTargetService implements OnModuleInit {
           side,
         );
 
+        // calculate limit price based on trigger and buffer pct
+        const limitPrice = this.calculateSLLimitPrice(trigger, side);
+
         this.logger.log(
-          `DEBUG SL | open=${entryPrice} | SL_PERCENT=${this.SL_PERCENT} | calculated trigger=${trigger}`,
+          `DEBUG SL | open=${entryPrice} | SL_PERCENT=${this.SL_PERCENT} | limit price =${limitPrice}| calculated trigger=${trigger}`,
         );
         const res = await this.ordersService.placeOrder({
           buy_or_sell: side === 'BUY' ? 'S' : 'B',
@@ -260,9 +266,9 @@ export class StoplossTargetService implements OnModuleInit {
           exchange: tick.e,
           tradingsymbol: instrument.tradingSymbol,
           quantity: qty,
-          price_type: 'SL-MKT',
-          price: 0,
-          trigger_price: trigger,
+          price_type: 'SL-LMT', // ✅ CHANGED
+          price: limitPrice, // ✅ REQUIRED
+          trigger_price: trigger, // ✅ REQUIRED
           retention: 'DAY',
           amo: 'NO',
           remarks: 'AUTO_INITIAL_SL',
@@ -374,6 +380,7 @@ export class StoplossTargetService implements OnModuleInit {
       instrument.tradingSymbol,
       qty,
       normalizedSL,
+      side, // ✅ REQUIRED
     );
 
     // =====================================================
@@ -474,7 +481,7 @@ export class StoplossTargetService implements OnModuleInit {
       (o) =>
         o.token === tick.tk &&
         o.exch === tick.e &&
-        o.prctyp === 'SL-MKT' &&
+        o.prctyp === 'SL-LMT' &&
         o.status === 'TRIGGER_PENDING',
     );
   }
@@ -539,15 +546,18 @@ export class StoplossTargetService implements OnModuleInit {
     tradingSymbol: string,
     qty: number,
     trigger: number,
+    side: 'BUY' | 'SELL', // ✅ ADD THIS
   ) {
+    // calculating limit price based on trigger and buffer pct
+    const limitPrice = this.calculateSLLimitPrice(trigger, side);
     await this.ordersService.modifyOrder({
       orderno: orderId,
       exchange,
       tradingsymbol: tradingSymbol,
       quantity: qty,
-      newprice_type: 'SL-MKT',
-      newprice: 0,
-      newtrigger_price: trigger,
+      newprice_type: 'SL-LMT', // ✅ CHANGED
+      newprice: limitPrice, // ✅ REQUIRED
+      newtrigger_price: trigger, // ✅ REQUIRED
     });
   }
 
@@ -659,14 +669,17 @@ export class StoplossTargetService implements OnModuleInit {
         instrument,
         position.netqty > 0 ? 'BUY' : 'SELL',
       );
+      // finding side and making limit price based on trigger price
+      const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
+      const limitPrice = this.calculateSLLimitPrice(normalizedTrigger, side);
 
       await this.ordersService.modifyOrder({
         orderno: orderId,
         exchange: tick.e,
         tradingsymbol: instrument.tradingSymbol,
         quantity: netQty,
-        newprice_type: 'SL-MKT',
-        newprice: 0,
+        newprice_type: 'SL-LMT',
+        newprice: limitPrice,
         newtrigger_price: normalizedTrigger, // 🔥 REQUIRED
       });
 
@@ -743,5 +756,19 @@ export class StoplossTargetService implements OnModuleInit {
       );
       return Number(rawPrice.toFixed(2));
     }
+  }
+
+  //reusable helper function for calculating sl limit price
+  private calculateSLLimitPrice(
+    triggerPrice: number,
+    side: 'BUY' | 'SELL',
+  ): number {
+    const buffer = triggerPrice * this.SL_LIMIT_PCT;
+
+    const price =
+      side === 'SELL' ? triggerPrice - buffer : triggerPrice + buffer;
+
+    // round to 2 decimals for safety
+    return Number(price.toFixed(2));
   }
 }
