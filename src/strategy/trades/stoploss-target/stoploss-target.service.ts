@@ -681,11 +681,11 @@ export class StoplossTargetService implements OnModuleInit {
       );
       // finding side and making limit price based on trigger price
       const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
-     const limitPrice = this.calculateSLLimitPrice(
-       normalizedTrigger,
-       side,
-       instrument, // ✅ ADD
-     );
+      const limitPrice = this.calculateSLLimitPrice(
+        normalizedTrigger,
+        side,
+        instrument, // ✅ ADD
+      );
 
       await this.ordersService.modifyOrder({
         orderno: orderId,
@@ -776,14 +776,47 @@ export class StoplossTargetService implements OnModuleInit {
   private calculateSLLimitPrice(
     triggerPrice: number,
     side: 'BUY' | 'SELL',
-    instrument: any, // ✅ ADD
+    instrument: any,
   ): number {
     const buffer = triggerPrice * this.SL_LIMIT_PCT;
 
     const rawPrice =
-      side === 'SELL' ? triggerPrice - buffer : triggerPrice + buffer;
+      side === 'SELL'
+        ? triggerPrice - buffer // must be BELOW trigger
+        : triggerPrice + buffer; // must be ABOVE trigger
 
-    // 🔥 normalize to tick size again using to redefind limit prices like trigger price as per tick size
-    return this.normalizeTriggerPrice(rawPrice, instrument, side);
+    return this.normalizeLimitPrice(rawPrice, instrument, side);
+  }
+  // helper to normallize limit price
+  private normalizeLimitPrice(
+    rawPrice: number,
+    instrument: any,
+    side: 'BUY' | 'SELL',
+  ): number {
+    try {
+      const tickSizeRaw = instrument?.tickSize ?? instrument?.raw?.TickSize;
+      if (!tickSizeRaw) return Number(rawPrice.toFixed(2));
+
+      const tickSizeStr = String(tickSizeRaw).trim();
+      const tickSize = Number(tickSizeStr);
+      if (!Number.isFinite(tickSize) || tickSize <= 0)
+        return Number(rawPrice.toFixed(2));
+
+      const ticks = rawPrice / tickSize;
+
+      // 🔥 OPPOSITE rounding vs trigger
+      const roundedTicks =
+        side === 'SELL' ? Math.floor(ticks) : Math.ceil(ticks);
+
+      const normalized = roundedTicks * tickSize;
+
+      const decimals = tickSizeStr.includes('.')
+        ? tickSizeStr.split('.')[1].length
+        : 0;
+
+      return Number(normalized.toFixed(decimals));
+    } catch {
+      return Number(rawPrice.toFixed(2));
+    }
   }
 }
