@@ -590,6 +590,10 @@ export class StoplossTargetService implements OnModuleInit {
     return { openPrice, currentSL, highestPrice, lowestPrice, stage };
   }
 
+  // =====================================================
+  // 🛠️ stoploss qunaitity sync logics and functions
+  // =====================================================
+
   //HELPER: EXTRACT SL QTY & SIDE for managing missed qty cases
   private getSLOrderQty(order: any): number | null {
     if (!order) return null;
