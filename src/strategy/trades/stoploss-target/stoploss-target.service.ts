@@ -696,30 +696,34 @@ export class StoplossTargetService implements OnModuleInit {
     instrument: any,
     side: 'BUY' | 'SELL',
   ): number {
+
     const tickSizeRaw = instrument?.ti ?? instrument?.tick_size;
     const tickSize = Number(tickSizeRaw);
-
+    
     // Fallback safety
     if (!tickSize || !Number.isFinite(tickSize) || tickSize <= 0) {
       return Number(rawPrice.toFixed(2));
     }
-
+    
     // Step-1: normalize to tick size
     const factor = rawPrice / tickSize;
     const normalized =
-      side === 'BUY'
-        ? Math.floor(factor) * tickSize
-        : Math.ceil(factor) * tickSize;
-
+    side === 'BUY'
+    ? Math.floor(factor) * tickSize
+    : Math.ceil(factor) * tickSize;
+    
     // Step-2: determine decimals allowed by tick size
     const tickDecimals = (() => {
       const s = tickSize.toString();
       return s.includes('.') ? s.split('.')[1].length : 0;
     })();
-
+    
     // Step-3: broker hard rule → max 2 decimals
     const finalDecimals = Math.min(tickDecimals, 2);
-
+    
+    this.logger.log(
+      `🎯 SL Normalize | raw=${rawPrice} | tick=${tickSize} | side=${side} | final=${finalDecimals}`,
+    );
     // Step-4: final rounding
     return Number(normalized.toFixed(finalDecimals));
   }
