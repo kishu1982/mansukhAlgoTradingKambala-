@@ -686,45 +686,42 @@ export class StoplossTargetService implements OnModuleInit {
   }
 
   /**
-   * Normalize SL trigger price according to:
-   * 1️⃣ Tick size
-   * 2️⃣ Direction safety (BUY floor, SELL ceil)
-   * 3️⃣ Max allowed decimals (<= 2)
+   * Normalize trigger price so that:
+   * 1) It is an EXACT multiple of tick size
+   * 2) Direction-safe (BUY floor, SELL ceil)
+   * 3) No floating-point drift
    */
   private normalizeTriggerPrice(
     rawPrice: number,
     instrument: any,
     side: 'BUY' | 'SELL',
   ): number {
+    const tickSize = Number(instrument?.ti);
 
-    const tickSizeRaw = instrument?.ti ?? instrument?.tick_size;
-    const tickSize = Number(tickSizeRaw);
-    
-    // Fallback safety
     if (!tickSize || !Number.isFinite(tickSize) || tickSize <= 0) {
       return Number(rawPrice.toFixed(2));
     }
-    
-    // Step-1: normalize to tick size
-    const factor = rawPrice / tickSize;
-    const normalized =
-    side === 'BUY'
-    ? Math.floor(factor) * tickSize
-    : Math.ceil(factor) * tickSize;
-    
-    // Step-2: determine decimals allowed by tick size
-    const tickDecimals = (() => {
-      const s = tickSize.toString();
-      return s.includes('.') ? s.split('.')[1].length : 0;
-    })();
-    
-    // Step-3: broker hard rule → max 2 decimals
-    const finalDecimals = Math.min(tickDecimals, 2);
-    
-    this.logger.log(
-      `🎯 SL Normalize | raw=${rawPrice} | tick=${tickSize} | side=${side} | final=${finalDecimals}`,
+
+    // 🔒 Convert to integer ticks FIRST (this is the fix)
+    const priceInTicks = rawPrice / tickSize;
+
+    const roundedTicks =
+      side === 'BUY'
+        ? Math.floor(priceInTicks + 1e-9)
+        : Math.ceil(priceInTicks - 1e-9);
+
+    const normalized = roundedTicks * tickSize;
+
+    // 🔒 Final hard clamp to avoid float dust
+    const decimals = Math.min(
+      tickSize.toString().includes('.')
+        ? tickSize.toString().split('.')[1].length
+        : 0,
+      2,
     );
-    // Step-4: final rounding
-    return Number(normalized.toFixed(finalDecimals));
+this.logger.log(
+  `TICK_CHECK | raw=${rawPrice} | tick=${tickSize} | normalized=${normalized}`,
+);
+    return Number(normalized.toFixed(decimals));
   }
 }
