@@ -231,6 +231,11 @@ export class StoplossTargetService implements OnModuleInit {
     const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
     const qty = Math.abs(Number(position.netqty));
 
+    const positionSide: 'BUY' | 'SELL' =
+      Number(position.netqty) > 0 ? 'BUY' : 'SELL';
+
+    const slOrderSide: 'BUY' | 'SELL' = positionSide === 'BUY' ? 'SELL' : 'BUY';
+
     // =====================================================
     // STEP-2 — INITIAL SL
     // =====================================================
@@ -257,7 +262,7 @@ export class StoplossTargetService implements OnModuleInit {
         // calculate limit price based on trigger and buffer pct
         const limitPrice = this.calculateSLLimitPrice(
           trigger,
-          side,
+          slOrderSide,
           instrument, // ✅ ADD
         );
 
@@ -384,7 +389,7 @@ export class StoplossTargetService implements OnModuleInit {
       instrument.tradingSymbol,
       qty,
       normalizedSL,
-      side, // ✅ REQUIRED
+      slOrderSide, // ✅ REQUIRED
       instrument, // ✅ ADD
     );
 
@@ -551,13 +556,13 @@ export class StoplossTargetService implements OnModuleInit {
     tradingSymbol: string,
     qty: number,
     trigger: number,
-    side: 'BUY' | 'SELL', // ✅ ADD THIS
+    slOrderSide: 'BUY' | 'SELL', // ✅ ADD THIS
     instrument: any, // ✅ ADD
   ) {
     // calculating limit price based on trigger and buffer pct
     const limitPrice = this.calculateSLLimitPrice(
       trigger,
-      side,
+      slOrderSide,
       instrument, // ✅ ADD
     );
     await this.ordersService.modifyOrder({
@@ -775,17 +780,18 @@ export class StoplossTargetService implements OnModuleInit {
   //reusable helper function for calculating sl limit price
   private calculateSLLimitPrice(
     triggerPrice: number,
-    side: 'BUY' | 'SELL',
+    slOrderSide: 'BUY' | 'SELL',
     instrument: any,
   ): number {
     const buffer = triggerPrice * this.SL_LIMIT_PCT;
 
+    // 🔒 RAW price must already be on correct side
     const rawPrice =
-      side === 'SELL'
-        ? triggerPrice - buffer // must be BELOW trigger
-        : triggerPrice + buffer; // must be ABOVE trigger
+      slOrderSide === 'SELL'
+        ? triggerPrice - buffer // SELL SL → BELOW trigger
+        : triggerPrice + buffer; // BUY SL → ABOVE trigger
 
-    return this.normalizeLimitPrice(rawPrice, instrument, side);
+    return this.normalizeLimitPrice(rawPrice, instrument, slOrderSide);
   }
   // helper to normallize limit price
   private normalizeLimitPrice(
