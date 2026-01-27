@@ -240,12 +240,16 @@ export class StoplossTargetService implements OnModuleInit {
         const entryPrice = ltp; // tick.lp is true traded price
         const openPrice = Number(position.netavgprc);
 
-       const rawTrigger =
-         side === 'BUY'
-           ? entryPrice * (1 - this.SL_PERCENT)
-           : entryPrice * (1 + this.SL_PERCENT);
+        const rawTrigger =
+          side === 'BUY'
+            ? entryPrice * (1 - this.SL_PERCENT)
+            : entryPrice * (1 + this.SL_PERCENT);
 
-       const trigger = this.normalizeTriggerPrice(rawTrigger, instrument, side);
+        const trigger = this.normalizeTriggerPrice(
+          rawTrigger,
+          instrument,
+          side,
+        );
 
         this.logger.log(
           `DEBUG SL | open=${entryPrice} | SL_PERCENT=${this.SL_PERCENT} | calculated trigger=${trigger}`,
@@ -362,15 +366,15 @@ export class StoplossTargetService implements OnModuleInit {
     // =====================================================
     // MODIFY SL
     // =====================================================
-const normalizedSL = this.normalizeTriggerPrice(newSL, instrument, side);
+    const normalizedSL = this.normalizeTriggerPrice(newSL, instrument, side);
 
-await this.modifyStoploss(
-  orderId,
-  tick.e,
-  instrument.tradingSymbol,
-  qty,
-  normalizedSL,
-);
+    await this.modifyStoploss(
+      orderId,
+      tick.e,
+      instrument.tradingSymbol,
+      qty,
+      normalizedSL,
+    );
 
     // =====================================================
     // JSON LOG (EVENT-BASED)
@@ -645,12 +649,11 @@ await this.modifyStoploss(
         return;
       }
 
-      
       this.logger.warn(
         `⚠️ SL qty mismatch | token=${tick.tk} | SL=${slQty} | POS=${netQty}`,
       );
-      
-      // fixing tick size 
+
+      // fixing tick size
       const normalizedTrigger = this.normalizeTriggerPrice(
         trigger,
         instrument,
@@ -683,31 +686,41 @@ await this.modifyStoploss(
   }
 
   /**
-   * Normalize trigger price as per instrument tick size
-   *
-   * BUY SL  → round DOWN  (safer)
-   * SELL SL → round UP    (safer)
+   * Normalize SL trigger price according to:
+   * 1️⃣ Tick size
+   * 2️⃣ Direction safety (BUY floor, SELL ceil)
+   * 3️⃣ Max allowed decimals (<= 2)
    */
   private normalizeTriggerPrice(
     rawPrice: number,
     instrument: any,
     side: 'BUY' | 'SELL',
   ): number {
-    const tickSize = Number(instrument?.ti);
+    const tickSizeRaw = instrument?.ti ?? instrument?.tick_size;
+    const tickSize = Number(tickSizeRaw);
 
-    // No tick size → return as is (fallback safety)
+    // Fallback safety
     if (!tickSize || !Number.isFinite(tickSize) || tickSize <= 0) {
-      return Number(rawPrice.toFixed(2)); // safe default
+      return Number(rawPrice.toFixed(2));
     }
 
+    // Step-1: normalize to tick size
     const factor = rawPrice / tickSize;
-
     const normalized =
       side === 'BUY'
-        ? Math.floor(factor) * tickSize // BUY SL → below market
-        : Math.ceil(factor) * tickSize; // SELL SL → above market
+        ? Math.floor(factor) * tickSize
+        : Math.ceil(factor) * tickSize;
 
-    // Avoid floating precision garbage
-    return Number(normalized.toFixed(6));
+    // Step-2: determine decimals allowed by tick size
+    const tickDecimals = (() => {
+      const s = tickSize.toString();
+      return s.includes('.') ? s.split('.')[1].length : 0;
+    })();
+
+    // Step-3: broker hard rule → max 2 decimals
+    const finalDecimals = Math.min(tickDecimals, 2);
+
+    // Step-4: final rounding
+    return Number(normalized.toFixed(finalDecimals));
   }
 }
