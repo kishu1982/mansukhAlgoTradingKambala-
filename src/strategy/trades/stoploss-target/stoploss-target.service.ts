@@ -696,39 +696,52 @@ export class StoplossTargetService implements OnModuleInit {
     instrument: any,
     side: 'BUY' | 'SELL',
   ): number {
-    if (!instrument || instrument.ti === undefined) {
-      throw new Error(
-        `Tick size missing for instrument ${instrument?.tradingSymbol}`,
+    try {
+      if (!instrument || instrument.ti === undefined) {
+        this.logger.error(
+          `❌ Tick size missing | symbol=${instrument?.tradingSymbol}`,
+        );
+        return Number(rawPrice.toFixed(2)); // safe fallback
+      }
+
+      const tickSizeStr = String(instrument.ti).trim();
+      const tickSize = Number(tickSizeStr);
+
+      if (!Number.isFinite(tickSize) || tickSize <= 0) {
+        this.logger.error(
+          `❌ Invalid tick size "${instrument.ti}" | symbol=${instrument?.tradingSymbol}`,
+        );
+        return Number(rawPrice.toFixed(2)); // safe fallback
+      }
+
+      // ✅ integer-tick math (no float drift)
+      const ticks = rawPrice / tickSize;
+
+      const roundedTicks =
+        side === 'BUY' ? Math.floor(ticks) : Math.ceil(ticks);
+
+      const normalized = roundedTicks * tickSize;
+
+      // decimals from tick size string
+      const decimals = tickSizeStr.includes('.')
+        ? tickSizeStr.split('.')[1].length
+        : 0;
+
+      const finalPrice = Number(normalized.toFixed(decimals));
+
+      this.logger.log(
+        `TICK_CHECK | raw=${rawPrice} | tick=${tickSizeStr} | final=${finalPrice}`,
       );
-    }
 
-    const tickSizeStr = String(instrument.ti).trim();
-    const tickSize = Number(tickSizeStr);
-
-    if (!Number.isFinite(tickSize) || tickSize <= 0) {
-      throw new Error(
-        `Invalid tick size "${instrument.ti}" for ${instrument.tradingSymbol}`,
+      return finalPrice;
+    } catch (err) {
+      this.logger.error(
+        `❌ Tick normalization failed | raw=${rawPrice}`,
+        err?.message || err,
       );
+
+      // ultimate safety fallback
+      return Number(rawPrice.toFixed(2));
     }
-
-    // 🔒 INTEGER TICK MATH (NO FLOAT MODULO EVER)
-    const ticks = rawPrice / tickSize;
-
-    const roundedTicks = side === 'BUY' ? Math.floor(ticks) : Math.ceil(ticks);
-
-    const normalized = roundedTicks * tickSize;
-
-    // decimals strictly derived from tickSize STRING
-    const decimals = tickSizeStr.includes('.')
-      ? tickSizeStr.split('.')[1].length
-      : 0;
-
-    const finalPrice = Number(normalized.toFixed(decimals));
-
-    this.logger.log(
-      `TICK_CHECK | raw=${rawPrice} | tick=${tickSizeStr} | ticks=${roundedTicks} | final=${finalPrice}`,
-    );
-
-    return finalPrice;
   }
 }
