@@ -696,32 +696,39 @@ export class StoplossTargetService implements OnModuleInit {
     instrument: any,
     side: 'BUY' | 'SELL',
   ): number {
-    const tickSize = Number(instrument?.ti);
-
-    if (!tickSize || !Number.isFinite(tickSize) || tickSize <= 0) {
-      return Number(rawPrice.toFixed(2));
+    if (!instrument || instrument.ti === undefined) {
+      throw new Error(
+        `Tick size missing for instrument ${instrument?.tradingSymbol}`,
+      );
     }
 
-    // 🔒 Convert to integer ticks FIRST (this is the fix)
-    const priceInTicks = rawPrice / tickSize;
+    const tickSizeStr = String(instrument.ti).trim();
+    const tickSize = Number(tickSizeStr);
 
-    const roundedTicks =
-      side === 'BUY'
-        ? Math.floor(priceInTicks + 1e-9)
-        : Math.ceil(priceInTicks - 1e-9);
+    if (!Number.isFinite(tickSize) || tickSize <= 0) {
+      throw new Error(
+        `Invalid tick size "${instrument.ti}" for ${instrument.tradingSymbol}`,
+      );
+    }
+
+    // 🔒 INTEGER TICK MATH (NO FLOAT MODULO EVER)
+    const ticks = rawPrice / tickSize;
+
+    const roundedTicks = side === 'BUY' ? Math.floor(ticks) : Math.ceil(ticks);
 
     const normalized = roundedTicks * tickSize;
 
-    // 🔒 Final hard clamp to avoid float dust
-    const decimals = Math.min(
-      tickSize.toString().includes('.')
-        ? tickSize.toString().split('.')[1].length
-        : 0,
-      2,
+    // decimals strictly derived from tickSize STRING
+    const decimals = tickSizeStr.includes('.')
+      ? tickSizeStr.split('.')[1].length
+      : 0;
+
+    const finalPrice = Number(normalized.toFixed(decimals));
+
+    this.logger.log(
+      `TICK_CHECK | raw=${rawPrice} | tick=${tickSizeStr} | ticks=${roundedTicks} | final=${finalPrice}`,
     );
-this.logger.log(
-  `TICK_CHECK | raw=${rawPrice} | tick=${tickSize} | normalized=${normalized}`,
-);
-    return Number(normalized.toFixed(decimals));
+
+    return finalPrice;
   }
 }
