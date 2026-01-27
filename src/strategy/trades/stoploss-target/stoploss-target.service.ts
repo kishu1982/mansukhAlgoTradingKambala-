@@ -69,9 +69,17 @@ export class StoplossTargetService implements OnModuleInit {
   // 🚀 INIT
   // =====================================================
   async onModuleInit() {
-    this.loadInstruments();
-    await this.refreshAllTradingData();
-    this.logger.log('✅ StoplossTargetService initialized');
+    try{
+      this.loadInstruments();
+      await this.refreshAllTradingData();
+      this.logger.log('✅ StoplossTargetService initialized');
+    }catch(e){
+      this.logger.error(
+        '⚠️ StoplossTargetService started with partial failure',
+        e?.message,
+      );
+    }
+    
     this.logger.log(
       `📊 SL config | SL_PERCENT=${this.SL_PERCENT} | FIRST_PROFIT_STAGE=${this.FIRST_PROFIT_STAGE}`,
     );
@@ -232,7 +240,6 @@ export class StoplossTargetService implements OnModuleInit {
         const entryPrice = ltp; // tick.lp is true traded price
         const openPrice = Number(position.netavgprc);
 
-
         const trigger =
           side === 'BUY'
             ? entryPrice * (1 - this.SL_PERCENT)
@@ -258,25 +265,24 @@ export class StoplossTargetService implements OnModuleInit {
         const orderId = this.extractOrderNo(res);
         if (!orderId) return;
 
-  const standardDiff = entryPrice * this.SL_PERCENT;
+        const standardDiff = entryPrice * this.SL_PERCENT;
 
-  this.appendOrderLog(orderId, {
-    action: 'INITIAL_SL_PLACED',
-    side,
-    stage: 'STANDARD',
+        this.appendOrderLog(orderId, {
+          action: 'INITIAL_SL_PLACED',
+          side,
+          stage: 'STANDARD',
 
-    trigger,
-    openPrice,
-    entryPrice,
+          trigger,
+          openPrice,
+          entryPrice,
 
-    slPercentUsed: this.SL_PERCENT,
-    slDiffUsed: standardDiff,
+          slPercentUsed: this.SL_PERCENT,
+          slDiffUsed: standardDiff,
 
-    highestPrice: side === 'BUY' ? entryPrice : undefined,
-    lowestPrice: side === 'SELL' ? entryPrice : undefined,
-    qty,
-  });
-
+          highestPrice: side === 'BUY' ? entryPrice : undefined,
+          lowestPrice: side === 'SELL' ? entryPrice : undefined,
+          qty,
+        });
 
         this.logger.log(`✅ Initial SL placed | ${tick.tk} | ${trigger}`);
       } finally {
@@ -353,27 +359,26 @@ export class StoplossTargetService implements OnModuleInit {
     // =====================================================
     // JSON LOG (EVENT-BASED)
     // =====================================================
-const appliedStage = nextStage ?? stage;
-const slPercentUsed =
-  appliedStage === 'FIRST_PROFIT'
-    ? this.SL_PERCENT * this.FIRST_PROFIT_STAGE
-    : this.SL_PERCENT;
+    const appliedStage = nextStage ?? stage;
+    const slPercentUsed =
+      appliedStage === 'FIRST_PROFIT'
+        ? this.SL_PERCENT * this.FIRST_PROFIT_STAGE
+        : this.SL_PERCENT;
 
-this.appendOrderLog(orderId, {
-  action: 'SL_TRAILED',
-  side,
-  stage: appliedStage,
+    this.appendOrderLog(orderId, {
+      action: 'SL_TRAILED',
+      side,
+      stage: appliedStage,
 
-  previousSL: currentSL,
-  newSL,
+      previousSL: currentSL,
+      newSL,
 
-  slPercentUsed,
-  slDiffUsed: activeDiff,
+      slPercentUsed,
+      slDiffUsed: activeDiff,
 
-  highestPrice: side === 'BUY' ? newExtreme : undefined,
-  lowestPrice: side === 'SELL' ? newExtreme : undefined,
-});
-
+      highestPrice: side === 'BUY' ? newExtreme : undefined,
+      lowestPrice: side === 'SELL' ? newExtreme : undefined,
+    });
 
     this.logger.log(`📈 SL trailed | ${tick.tk} | ${currentSL} → ${newSL}`);
   }

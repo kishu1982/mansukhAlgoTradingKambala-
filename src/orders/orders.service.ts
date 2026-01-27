@@ -1126,7 +1126,16 @@ export class OrdersService {
       const token = this.tokenService.getToken();
 
       if (!token?.Access_token || !token?.UID || !token?.Account_ID) {
-        throw new UnauthorizedException('Invalid or missing access token');
+        this.logger.warn(
+          '⚠️ Missing or invalid token while fetching order book',
+        );
+
+        return {
+          status: 'ERROR',
+          count: 0,
+          trades: [],
+          message: 'Unauthorized or missing token',
+        };
       }
 
       // 🧠 Init SDK
@@ -1137,23 +1146,8 @@ export class OrdersService {
 
       const response = await api.get_orderbook();
 
-      // ❌ Logical API error
-      // if (response?.stat === 'Not_Ok') {
-      //   throw new InternalServerErrorException({
-      //     message: 'Order book fetch failed',
-      //     error: response.emsg,
-      //     raw: response,
-      //   });
-      // }
-
-      // // ✅ Success
-      // return {
-      //   status: 'OK',
-      //   count: Array.isArray(response) ? response.length : 0,
-      //   orders: response,
-      // };
       /**
-       * ✅ CASE 1: Empty array → NO DATA (valid)
+       * ✅ CASE 1: Empty array → valid no data
        */
       if (Array.isArray(response) && response.length === 0) {
         return {
@@ -1165,7 +1159,7 @@ export class OrdersService {
       }
 
       /**
-       * ✅ CASE 2: API returns Not_Ok but means NO DATA
+       * ✅ CASE 2: Not_Ok but means NO DATA
        */
       if (
         response?.stat === 'Not_Ok' &&
@@ -1176,19 +1170,22 @@ export class OrdersService {
           status: 'OK',
           count: 0,
           trades: [],
-          message: response.emsg || 'No trade data available',
+          message: response.emsg,
         };
       }
 
       /**
-       * ❌ CASE 3: Real API error
+       * ❌ CASE 3: Real API error → soft fail
        */
       if (response?.stat === 'Not_Ok') {
-        throw new InternalServerErrorException({
-          message: 'Trade book fetch failed',
-          error: response.emsg,
-          raw: response,
-        });
+        this.logger.error('❌ Order book API error', response.emsg);
+
+        return {
+          status: 'ERROR',
+          count: 0,
+          trades: [],
+          message: response.emsg || 'Order book fetch failed',
+        };
       }
 
       /**
@@ -1200,16 +1197,19 @@ export class OrdersService {
         trades: response,
       };
     } catch (error) {
-      this.logger.error('❌ getOrderBook failed', error.message, error.stack);
+      // 🚨 NEVER crash the app
+      this.logger.error(
+        '❌ getOrderBook crashed',
+        error?.message,
+        error?.stack,
+      );
 
-      if (error instanceof UnauthorizedException) {
-        throw error;
-      }
-
-      throw new InternalServerErrorException({
-        message: 'Failed to fetch order book',
-        error: error.message,
-      });
+      return {
+        status: 'ERROR',
+        count: 0,
+        trades: [],
+        message: 'Unexpected error while fetching order book',
+      };
     }
   }
 
