@@ -697,24 +697,26 @@ export class StoplossTargetService implements OnModuleInit {
     side: 'BUY' | 'SELL',
   ): number {
     try {
-      if (!instrument || instrument.ti === undefined) {
+      const tickSizeRaw = instrument?.tickSize ?? instrument?.raw?.TickSize;
+
+      if (!tickSizeRaw) {
         this.logger.error(
           `❌ Tick size missing | symbol=${instrument?.tradingSymbol}`,
         );
-        return Number(rawPrice.toFixed(2)); // safe fallback
+        return Number(rawPrice.toFixed(2));
       }
 
-      const tickSizeStr = String(instrument.ti).trim();
+      const tickSizeStr = String(tickSizeRaw).trim();
       const tickSize = Number(tickSizeStr);
 
       if (!Number.isFinite(tickSize) || tickSize <= 0) {
         this.logger.error(
-          `❌ Invalid tick size "${instrument.ti}" | symbol=${instrument?.tradingSymbol}`,
+          `❌ Invalid tick size "${tickSizeRaw}" | symbol=${instrument?.tradingSymbol}`,
         );
-        return Number(rawPrice.toFixed(2)); // safe fallback
+        return Number(rawPrice.toFixed(2));
       }
 
-      // ✅ integer-tick math (no float drift)
+      // 🔒 INTEGER TICK MATH — NO FLOAT MODULO
       const ticks = rawPrice / tickSize;
 
       const roundedTicks =
@@ -722,7 +724,7 @@ export class StoplossTargetService implements OnModuleInit {
 
       const normalized = roundedTicks * tickSize;
 
-      // decimals from tick size string
+      // decimals derived from tick size STRING
       const decimals = tickSizeStr.includes('.')
         ? tickSizeStr.split('.')[1].length
         : 0;
@@ -739,8 +741,6 @@ export class StoplossTargetService implements OnModuleInit {
         `❌ Tick normalization failed | raw=${rawPrice}`,
         err?.message || err,
       );
-
-      // ultimate safety fallback
       return Number(rawPrice.toFixed(2));
     }
   }
