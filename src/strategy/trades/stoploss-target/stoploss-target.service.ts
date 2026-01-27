@@ -240,10 +240,12 @@ export class StoplossTargetService implements OnModuleInit {
         const entryPrice = ltp; // tick.lp is true traded price
         const openPrice = Number(position.netavgprc);
 
-        const trigger =
-          side === 'BUY'
-            ? entryPrice * (1 - this.SL_PERCENT)
-            : entryPrice * (1 + this.SL_PERCENT);
+       const rawTrigger =
+         side === 'BUY'
+           ? entryPrice * (1 - this.SL_PERCENT)
+           : entryPrice * (1 + this.SL_PERCENT);
+
+       const trigger = this.normalizeTriggerPrice(rawTrigger, instrument, side);
 
         this.logger.log(
           `DEBUG SL | open=${entryPrice} | SL_PERCENT=${this.SL_PERCENT} | calculated trigger=${trigger}`,
@@ -360,13 +362,15 @@ export class StoplossTargetService implements OnModuleInit {
     // =====================================================
     // MODIFY SL
     // =====================================================
-    await this.modifyStoploss(
-      orderId,
-      tick.e,
-      instrument.tradingSymbol,
-      qty,
-      newSL,
-    );
+const normalizedSL = this.normalizeTriggerPrice(newSL, instrument, side);
+
+await this.modifyStoploss(
+  orderId,
+  tick.e,
+  instrument.tradingSymbol,
+  qty,
+  normalizedSL,
+);
 
     // =====================================================
     // JSON LOG (EVENT-BASED)
@@ -641,8 +645,16 @@ export class StoplossTargetService implements OnModuleInit {
         return;
       }
 
+      
       this.logger.warn(
         `⚠️ SL qty mismatch | token=${tick.tk} | SL=${slQty} | POS=${netQty}`,
+      );
+      
+      // fixing tick size 
+      const normalizedTrigger = this.normalizeTriggerPrice(
+        trigger,
+        instrument,
+        position.netqty > 0 ? 'BUY' : 'SELL',
       );
 
       await this.ordersService.modifyOrder({
@@ -652,7 +664,7 @@ export class StoplossTargetService implements OnModuleInit {
         quantity: netQty,
         newprice_type: 'SL-MKT',
         newprice: 0,
-        newtrigger_price: trigger, // 🔥 REQUIRED
+        newtrigger_price: normalizedTrigger, // 🔥 REQUIRED
       });
 
       this.appendOrderLog(orderId, {
@@ -668,5 +680,34 @@ export class StoplossTargetService implements OnModuleInit {
     } catch (err) {
       this.logger.error('❌ Failed to sync SL quantity', err);
     }
+  }
+
+  /**
+   * Normalize trigger price as per instrument tick size
+   *
+   * BUY SL  → round DOWN  (safer)
+   * SELL SL → round UP    (safer)
+   */
+  private normalizeTriggerPrice(
+    rawPrice: number,
+    instrument: any,
+    side: 'BUY' | 'SELL',
+  ): number {
+    const tickSize = Number(instrument?.ti);
+
+    // No tick size → return as is (fallback safety)
+    if (!tickSize || !Number.isFinite(tickSize) || tickSize <= 0) {
+      return Number(rawPrice.toFixed(2)); // safe default
+    }
+
+    const factor = rawPrice / tickSize;
+
+    const normalized =
+      side === 'BUY'
+        ? Math.floor(factor) * tickSize // BUY SL → below market
+        : Math.ceil(factor) * tickSize; // SELL SL → above market
+
+    // Avoid floating precision garbage
+    return Number(normalized.toFixed(6));
   }
 }
