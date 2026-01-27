@@ -23,6 +23,8 @@ interface PositionLifecycleState {
 @Injectable()
 export class StoplossTargetService implements OnModuleInit {
   private readonly logger = new Logger(StoplossTargetService.name);
+  private refreshLock = false; // to prevent overlapping refreshes
+
   private readonly SL_LIMIT_PCT = Number(
     process.env.SL_LIMIT_PRICE_PCT || 0.01,
   );
@@ -122,11 +124,26 @@ export class StoplossTargetService implements OnModuleInit {
   // =====================================================
   @Interval(1000)
   async refreshAllTradingData() {
-    await Promise.all([
-      this.refreshNetPositions(),
-      this.refreshOrderBook(),
-      this.refreshTradeBook(),
-    ]);
+    // 🔒 prevent overlapping executions
+    if (this.refreshLock) {
+      this.logger.debug(
+        '⏳ refreshAllTradingData skipped (previous still running)',
+      );
+      return;
+    }
+
+    this.refreshLock = true;
+
+    try {
+      // ❗ SERIAL execution (NOT Promise.all)
+      await this.refreshNetPositions();
+      await this.refreshOrderBook();
+      await this.refreshTradeBook();
+    } catch (err) {
+      this.logger.error('❌ refreshAllTradingData failed', err?.message || err);
+    } finally {
+      this.refreshLock = false;
+    }
   }
 
   private async refreshNetPositions() {
