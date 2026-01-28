@@ -105,10 +105,17 @@ export class TradesExecutionService {
     exchange: string,
   ): Promise<void> {
     let orderBook: any[] = [];
+    this.logger.log(
+      `Checking pending orders to cancel for ${exchange}:${token}`,
+    );
 
     try {
       const res = await this.orderService.getOrderBook();
       orderBook = Array.isArray(res?.trades) ? res.trades : [];
+      // this.logger.log(
+      //   `Fetched ${orderBook.length} orders from order book : `,
+      //   orderBook,
+      // );
     } catch (err) {
       this.logger.error('❌ Failed to fetch order book', err?.stack);
       return;
@@ -125,18 +132,23 @@ export class TradesExecutionService {
 
     if (!pendingOrders.length) return;
 
+    // this.logger.log(
+    //   `Found ${pendingOrders.length} pending orders to cancel`,
+    //   pendingOrders,
+    // );
+
     this.logger.warn(
       `🧹 Cancelling ${pendingOrders.length} pending orders | ${exchange}:${token}`,
     );
 
     for (const order of pendingOrders) {
       try {
-        await this.orderService.cancelOrder(order.orderno);
+        await this.orderService.cancelOrder(order.norenordno);
 
-        this.logger.log(`❌ Cancelled order ${order.orderno}`);
+        this.logger.log(`❌ Cancelled order ${order.norenordno}`);
       } catch (err) {
         this.logger.error(
-          `❌ Failed to cancel order ${order.orderno}`,
+          `❌ Failed to cancel order ${order.norenordno}`,
           err?.stack,
         );
       }

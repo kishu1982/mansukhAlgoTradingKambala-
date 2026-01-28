@@ -222,6 +222,7 @@ export class StoplossTargetService implements OnModuleInit {
     const instrument = this.findInstrument(tick);
     if (!instrument) return;
 
+    
     await this.processRisk({
       tick,
       position,
