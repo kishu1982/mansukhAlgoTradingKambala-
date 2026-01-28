@@ -9,6 +9,7 @@ import { StrategyService } from 'src/strategy/strategy.service';
 import { WS_SUBSCRIPTIONS } from './subscriptions/ws.subscriptions';
 import { TradingviewTradeConfigService } from 'src/strategy/tradingview-trade-config/tradingview-trade-config.service';
 import { StoplossTargetService } from 'src/strategy/trades/stoploss-target/stoploss-target.service';
+import { read } from 'fs';
 
 const NorenWebSocket = require('norenrestapi/lib/websocket');
 
@@ -18,6 +19,9 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
   private ws: any;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isConnected = false;
+  // variable to auto manage subscriptions
+  private readonly subscribedTokens = new Set<string>();
+  private subscriptionRefreshTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly tokenService: TokenService,
@@ -39,6 +43,7 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
       this.ws.close();
       this.logger.warn('🔌 WebSocket closed');
     }
+    this.stopSubscriptionAutoRefresh(); // 👈 NEW
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
@@ -79,7 +84,8 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
           // 🔔 subscribe from central config
           //this.subscribeGroup('DEFAULT');
           try {
-            await this.subscribeGroup('DEFAULT');
+            // await this.subscribeGroup('DEFAULT');
+            this.startSubscriptionAutoRefresh(); // 👈 NEW
           } catch (error) {
             this.logger.error(
               'Failed to subscribe websocket instruments',
@@ -91,6 +97,8 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
         socket_close: () => {
           this.isConnected = false;
           this.logger.warn('❌ WebSocket Disconnected');
+
+          this.stopSubscriptionAutoRefresh(); // 👈 NEW
           this.scheduleReconnect();
         },
 
@@ -144,6 +152,8 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
     }
 
     keys.forEach((key) => {
+      if (this.subscribedTokens.has(key)) return; // 🔒 no duplicate
+
       const payload = {
         t: 't',
         k: key,
@@ -197,28 +207,88 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
   //   this.subscribe(symbols);
   // }
 
-  private async subscribeGroup(group: keyof typeof WS_SUBSCRIPTIONS) {
-    // 1️⃣ Static subscriptions
+  // private async subscribeGroup(group: keyof typeof WS_SUBSCRIPTIONS) {
+  //   // 1️⃣ Static subscriptions
+  //   const staticSymbols = WS_SUBSCRIPTIONS[group] ?? [];
+
+  //   // 2️⃣ Dynamic subscriptions from DB
+  //   const dynamicSymbols =
+  //     await this.tradeConfigService.getUniqueTokenExchangePairs();
+
+  //   // 3️⃣ Merge + Deduplicate
+  //   const finalSymbols = Array.from(
+  //     new Set([...staticSymbols, ...dynamicSymbols]),
+  //   );
+
+  //   if (!finalSymbols.length) {
+  //     this.logger.warn(`No WS subscriptions found for group: ${group}`);
+  //     return;
+  //   }
+
+  //   this.logger.log(
+  //     `🔔 Subscribing ${finalSymbols.length} instruments [${group}]`,
+  //   );
+
+  //   this.subscribe(finalSymbols);
+  // }
+  private async refreshSubscriptions(group: keyof typeof WS_SUBSCRIPTIONS) {
+    // 1️⃣ Static
     const staticSymbols = WS_SUBSCRIPTIONS[group] ?? [];
 
-    // 2️⃣ Dynamic subscriptions from DB
+    // 2️⃣ Dynamic from DB
     const dynamicSymbols =
       await this.tradeConfigService.getUniqueTokenExchangePairs();
 
-    // 3️⃣ Merge + Deduplicate
-    const finalSymbols = Array.from(
-      new Set([...staticSymbols, ...dynamicSymbols]),
+    const latestSymbols = new Set([...staticSymbols, ...dynamicSymbols]);
+
+    // 3️⃣ Find NEW symbols
+    const newSymbols = [...latestSymbols].filter(
+      (sym) => !this.subscribedTokens.has(sym),
     );
 
-    if (!finalSymbols.length) {
-      this.logger.warn(`No WS subscriptions found for group: ${group}`);
-      return;
+    if (newSymbols.length) {
+      this.logger.log(`➕ New WS instruments detected (${newSymbols.length})`);
+      this.subscribe(newSymbols);
     }
 
-    this.logger.log(
-      `🔔 Subscribing ${finalSymbols.length} instruments [${group}]`,
-    );
+    // 4️⃣ OPTIONAL: Unsubscribe removed symbols
+    // const removedSymbols = [...this.subscribedTokens].filter(
+    //   (sym) => !latestSymbols.has(sym),
+    // );
+    // if (removedSymbols.length) {
+    //   this.unsubscribe(removedSymbols);
+    // }
 
-    this.subscribe(finalSymbols);
+    // 5️⃣ Sync state
+    this.subscribedTokens.clear();
+    latestSymbols.forEach((s) => this.subscribedTokens.add(s));
+  }
+  //Add auto-refresh scheduler (every 5 sec)
+
+  private startSubscriptionAutoRefresh() {
+    if (this.subscriptionRefreshTimer) return;
+
+    this.logger.log('🔄 Starting WS subscription auto-refresh (5s)');
+
+    this.subscriptionRefreshTimer = setInterval(async () => {
+      if (!this.isConnected) return;
+
+      try {
+        await this.refreshSubscriptions('DEFAULT');
+      } catch (err) {
+        this.logger.error(
+          'Failed to refresh WS subscriptions',
+          this.normalizeError(err),
+        );
+      }
+    }, 5000);
+  }
+
+  private stopSubscriptionAutoRefresh() {
+    if (this.subscriptionRefreshTimer) {
+      clearInterval(this.subscriptionRefreshTimer);
+      this.subscriptionRefreshTimer = null;
+      this.logger.warn('🛑 Stopped WS subscription auto-refresh');
+    }
   }
 }

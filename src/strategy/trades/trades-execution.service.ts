@@ -312,7 +312,7 @@ Any qty → qty 0	Close all	PLACED
       `📌 Executing trade | ${trade.exchange}:${trade.token} | side=${trade.side} | lots=${trade.quantityLots}`,
     );
 
-    // 🧹 STEP 0: Cancel pending orders for same token
+    // 🧹 STEP 0: Cancel pending orders for same token (to save from short margin in NFO)
     await this.cancelPendingOrdersForToken(trade.token, trade.exchange);
 
     // 1️⃣ SECURITY INFO (MANDATORY)
