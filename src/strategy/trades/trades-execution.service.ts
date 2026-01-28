@@ -428,7 +428,9 @@ Any qty → qty 0	Close all	PLACED
     // 🔁 OPPOSITE POSITION EXISTS
     // =====================================================
     if (netQty !== 0 && Math.sign(netQty) !== Math.sign(desiredNetQty)) {
-      this.logger.log('🔁 Opposite position detected');
+      this.logger.log(
+        `🔁 Opposite position detected.. desired qty: ${desiredNetQty}, existing qty: ${netQty}`,
+      );
 
       await this.closeFullPosition(netQty, trade, tradingSymbol);
     }

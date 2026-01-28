@@ -104,6 +104,7 @@ if (
 
           tradeStatus: 'PENDING',
           tradeDate,
+          createdAt: new Date(), // 👈 manual
         } as FinalTradeToBePlacedEntity); // 👈 optional but safe
       }
     }
