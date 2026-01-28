@@ -8,6 +8,7 @@ export class TradeLegDto {
   exchange: string;
 
   @IsNumber()
+  @Min(0, { message: 'quantityLots cannot be negative' })
   quantityLots: number;
 
   @IsString()

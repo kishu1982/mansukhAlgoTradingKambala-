@@ -31,6 +31,7 @@ export class CreateTradeConfigDto {
 
   @IsNumber()
   @IsNotEmpty()
+  @Min(0, { message: 'quantityLots cannot be negative' })
   quantityLots: number;
 
   @IsEnum(['BUY', 'SELL'])
