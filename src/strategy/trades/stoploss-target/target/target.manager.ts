@@ -61,7 +61,7 @@ export class TargetManager {
     const entryTrade = entryTrades[0];
 
     const entryOrderId = entryTrade.norenordno;
-    const entryPrice = Number(entryTrade.prc);
+    const entryPrice = Number(entryTrade.flprc);
 
     if (!entryOrderId) return;
 
