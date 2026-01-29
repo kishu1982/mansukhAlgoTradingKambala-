@@ -5,6 +5,7 @@ import * as path from 'path';
 import { OrdersService } from 'src/orders/orders.service';
 import { NormalizedTick } from './stoploss-target.types';
 import { ConfigService } from '@nestjs/config';
+import { TargetManager } from './target/target.manager';
 
 interface CachedBlock<T> {
   data: T;
@@ -24,6 +25,9 @@ interface PositionLifecycleState {
 export class StoplossTargetService implements OnModuleInit {
   private readonly logger = new Logger(StoplossTargetService.name);
   private refreshLock = false; // to prevent overlapping refreshes
+
+  // adding target logic file properties
+  private targetManager: TargetManager;
 
   private readonly SL_LIMIT_PCT = Number(
     process.env.SL_LIMIT_PRICE_PCT || 0.01,
@@ -88,6 +92,13 @@ export class StoplossTargetService implements OnModuleInit {
     this.logger.log(
       `📊 SL config | SL_PERCENT=${this.SL_PERCENT} | FIRST_PROFIT_STAGE=${this.FIRST_PROFIT_STAGE}`,
     );
+
+    // initializing target manager
+    this.targetManager = new TargetManager(
+      this.ordersService,
+      this.ConfigService,
+    );
+    this.logger.log('✅ 🎯 TargetManager initialized');
   }
   //defining getters for config values
   private get SL_PERCENT(): number {
@@ -227,6 +238,17 @@ export class StoplossTargetService implements OnModuleInit {
       position,
       instrument,
       pendingSL,
+    });
+
+    // ============================
+    // 🔥 TARGET ACQUIREMENT LOGIC 
+    // ============================
+
+    await this.targetManager.checkAndProcessTarget({
+      tick,
+      netPosition: position,
+      tradeBook: this.tradeBook.data,
+      instrument,
     });
   }
 
@@ -686,16 +708,16 @@ export class StoplossTargetService implements OnModuleInit {
       this.logger.log(`pending sl data: ${JSON.stringify(pendingSL)}`);
 
       // 🔒 IMPORTANT: reuse existing prices exactly
-  const existingTrigger = this.extractSLTriggerPrice(pendingSL);
-  const existingLimit = this.extractSLLimitPrice(pendingSL);
+      const existingTrigger = this.extractSLTriggerPrice(pendingSL);
+      const existingLimit = this.extractSLLimitPrice(pendingSL);
 
-  if (!existingTrigger || !existingLimit) {
-    this.logger.error(
-      `❌ Cannot sync SL qty | missing price data | order=${orderId}`,
-      pendingSL,
-    );
-    return;
-  }
+      if (!existingTrigger || !existingLimit) {
+        this.logger.error(
+          `❌ Cannot sync SL qty | missing price data | order=${orderId}`,
+          pendingSL,
+        );
+        return;
+      }
 
       this.logger.warn(
         `⚠️ SL qty mismatch | token=${tick.tk} | SL=${slQty} | POS=${netQty}`,
