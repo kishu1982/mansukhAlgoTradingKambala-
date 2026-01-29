@@ -101,6 +101,13 @@ export class TargetManager {
       `Target waiting to be hit for token: ${token} at price: ${targetPrice.toFixed(2)} | LTP: ${ltp},`,
     );
 
+    // safety check of target price
+    if (targetPrice <= 0) {
+      console.log(
+        `Invalid target price calculated: ${targetPrice} for token: ${token}`,
+      );
+      return;
+    }
     if (!targetHit) return;
 
     // ===============================
