@@ -683,47 +683,41 @@ export class StoplossTargetService implements OnModuleInit {
       const orderId = this.extractOrderNo(pendingSL.orderno || pendingSL);
       if (!orderId) return;
 
-      const trigger = this.getSLTriggerPrice(pendingSL);
-      if (!trigger) {
-        this.logger.error(
-          `❌ Cannot sync SL qty | trigger price missing | order=${orderId}`,
-        );
-        return;
-      }
+      this.logger.log(`pending sl data: ${JSON.stringify(pendingSL)}`);
+
+      // 🔒 IMPORTANT: reuse existing prices exactly
+  const existingTrigger = this.extractSLTriggerPrice(pendingSL);
+  const existingLimit = this.extractSLLimitPrice(pendingSL);
+
+  if (!existingTrigger || !existingLimit) {
+    this.logger.error(
+      `❌ Cannot sync SL qty | missing price data | order=${orderId}`,
+      pendingSL,
+    );
+    return;
+  }
 
       this.logger.warn(
         `⚠️ SL qty mismatch | token=${tick.tk} | SL=${slQty} | POS=${netQty}`,
       );
 
-      // fixing tick size
-      const normalizedTrigger = this.normalizeTriggerPrice(
-        trigger,
-        instrument,
-        position.netqty > 0 ? 'BUY' : 'SELL',
-      );
-      // finding side and making limit price based on trigger price
-      const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
-      const limitPrice = this.calculateSLLimitPrice(
-        normalizedTrigger,
-        side,
-        instrument, // ✅ ADD
-      );
-
+      // ✅ MODIFY ONLY QUANTITY
       await this.ordersService.modifyOrder({
         orderno: orderId,
         exchange: tick.e,
         tradingsymbol: instrument.tradingSymbol,
         quantity: netQty,
         newprice_type: 'SL-LMT',
-        newprice: limitPrice,
-        newtrigger_price: normalizedTrigger, // 🔥 REQUIRED
+        newprice: existingLimit, // 🔒 unchanged
+        newtrigger_price: existingTrigger, // 🔒 unchanged
       });
 
       this.appendOrderLog(orderId, {
         action: 'SL_QTY_SYNCED',
         previousQty: slQty,
         newQty: netQty,
-        triggerPrice: trigger,
+        triggerPrice: existingTrigger,
+        limitPrice: existingLimit,
       });
 
       this.logger.log(
@@ -733,6 +727,86 @@ export class StoplossTargetService implements OnModuleInit {
       this.logger.error('❌ Failed to sync SL quantity', err);
     }
   }
+  // helper to get triggerprice and limit price exisiting
+  private extractSLTriggerPrice(order: any): number | null {
+    return order?.trgprc ? Number(order.trgprc) : null;
+  }
+
+  private extractSLLimitPrice(order: any): number | null {
+    return order?.prc ? Number(order.prc) : null;
+  }
+
+  // private async syncStoplossQuantityWithPosition(
+  //   tick: NormalizedTick,
+  //   position: any,
+  //   instrument: any,
+  //   pendingSL: any,
+  // ) {
+  //   try {
+  //     if (!position || !pendingSL) return;
+
+  //     const netQty = Math.abs(Number(position.netqty));
+  //     if (netQty <= 0) return;
+
+  //     const slQty = this.getSLOrderQty(pendingSL);
+  //     if (!slQty) return;
+
+  //     // No mismatch → nothing to do
+  //     if (slQty === netQty) return;
+
+  //     const orderId = this.extractOrderNo(pendingSL.orderno || pendingSL);
+  //     if (!orderId) return;
+
+  //     const trigger = this.getSLTriggerPrice(pendingSL);
+  //     if (!trigger) {
+  //       this.logger.error(
+  //         `❌ Cannot sync SL qty | trigger price missing | order=${orderId}`,
+  //       );
+  //       return;
+  //     }
+
+  //     this.logger.warn(
+  //       `⚠️ SL qty mismatch | token=${tick.tk} | SL=${slQty} | POS=${netQty}`,
+  //     );
+
+  //     // fixing tick size
+  //     const normalizedTrigger = this.normalizeTriggerPrice(
+  //       trigger,
+  //       instrument,
+  //       position.netqty > 0 ? 'BUY' : 'SELL',
+  //     );
+  //     // finding side and making limit price based on trigger price
+  //     const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
+  //     const limitPrice = this.calculateSLLimitPrice(
+  //       normalizedTrigger,
+  //       side,
+  //       instrument, // ✅ ADD
+  //     );
+
+  //     await this.ordersService.modifyOrder({
+  //       orderno: orderId,
+  //       exchange: tick.e,
+  //       tradingsymbol: instrument.tradingSymbol,
+  //       quantity: netQty,
+  //       newprice_type: 'SL-LMT',
+  //       newprice: limitPrice,
+  //       newtrigger_price: normalizedTrigger, // 🔥 REQUIRED
+  //     });
+
+  //     this.appendOrderLog(orderId, {
+  //       action: 'SL_QTY_SYNCED',
+  //       previousQty: slQty,
+  //       newQty: netQty,
+  //       triggerPrice: trigger,
+  //     });
+
+  //     this.logger.log(
+  //       `✅ SL quantity synced | order=${orderId} | ${slQty} → ${netQty}`,
+  //     );
+  //   } catch (err) {
+  //     this.logger.error('❌ Failed to sync SL quantity', err);
+  //   }
+  // }
 
   /**
    * Normalize trigger price so that:

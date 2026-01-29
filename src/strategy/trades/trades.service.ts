@@ -28,7 +28,7 @@ export class TradesService {
   ) {
 
     // ← now it's safe
-    this.MARKET_START_TIME  = this.configService.get<string>('TRADING_START_TIME', '09:15');   // ← add fallback if possible
+    this.MARKET_START_TIME  = this.configService.get<string>('TRADING_START_TIME', '09:20');   // ← add fallback if possible
     this.MARKET_CUTOFF_TIME = this.configService.get<string>('TRADING_END_TIME',   '15:30');
   }
 
