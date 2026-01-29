@@ -40,26 +40,28 @@ export class TargetManager {
     if (netQty <= 0) return;
 
     // 🔑 find latest trade (entry trade)
-const positionSide = Number(netPosition.netqty) > 0 ? 'BUY' : 'SELL';
+    const positionSide = Number(netPosition.netqty) > 0 ? 'BUY' : 'SELL';
 
-const entryTradeSide = positionSide === 'BUY' ? 'B' : 'S';
+    const entryTradeSide = positionSide === 'BUY' ? 'B' : 'S';
 
-// 🔒 only trades matching open position side
-const entryTrades = tradeBook
-  .filter(
-    (t) =>
-      t.token === token && t.exch === tick.e && t.trantype === entryTradeSide,
-  )
-  .sort(
-    (a, b) => new Date(b.exch_tm).getTime() - new Date(a.exch_tm).getTime(),
-  );
+    // 🔒 only trades matching open position side
+    const entryTrades = tradeBook
+      .filter(
+        (t) =>
+          t.token === token &&
+          t.exch === tick.e &&
+          t.trantype === entryTradeSide,
+      )
+      .sort(
+        (a, b) => new Date(b.exch_tm).getTime() - new Date(a.exch_tm).getTime(),
+      );
 
-if (!entryTrades.length) return;
+    if (!entryTrades.length) return;
 
-const entryTrade = entryTrades[0];
+    const entryTrade = entryTrades[0];
 
-const entryOrderId = entryTrade.norenordno;
-const entryPrice = Number(entryTrade.prc);
+    const entryOrderId = entryTrade.norenordno;
+    const entryPrice = Number(entryTrade.prc);
 
     if (!entryOrderId) return;
 
