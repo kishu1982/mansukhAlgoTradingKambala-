@@ -5,79 +5,42 @@ import { MongoRepository } from 'typeorm';
 import { getISTTradeDate } from 'src/common/utils/date.util';
 import { TradingViewSignalEntity } from 'src/database/entities/tradingview-signal.entity';
 import { ConfigService } from '@nestjs/config';
+import { isTradingAllowedForExchange } from 'src/common/utils/trading-time.util';
 
 @Injectable()
 export class TradesService {
   private readonly logger = new Logger(TradesService.name);
-  
-  // =====================================================
-  // 🔹 TIME CONFIG (IST)
-  // =====================================================
-  // Just declare — do NOT initialize yet
-  private readonly MARKET_START_TIME: string;
-  private readonly MARKET_CUTOFF_TIME: string;
-
-  private readonly TIME_RESTRICTED_EXCHANGES = new Set([
-    'NSE', 'NFO', 'BSE', 'BFO',
-  ]);
-
 
   constructor(
     @InjectRepository(FinalTradeToBePlacedEntity)
-    private readonly finalTradeRepo: MongoRepository<FinalTradeToBePlacedEntity>, private readonly configService: ConfigService,
-  ) {
-
-    // ← now it's safe
-    this.MARKET_START_TIME  = this.configService.get<string>('TRADING_START_TIME', '09:20');   // ← add fallback if possible
-    this.MARKET_CUTOFF_TIME = this.configService.get<string>('TRADING_END_TIME',   '15:30');
-  }
-
-  
-
-  // =====================================================
-  // 🔹 IST TIME CHECK
-  // =====================================================
-  private isWithinTradingTime(): boolean {
-    const now = new Date(
-      new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }),
-    );
-    const [sh, sm] = this.MARKET_START_TIME.split(':').map(Number);
-    const [eh, em] = this.MARKET_CUTOFF_TIME.split(':').map(Number);
-
-    const start = new Date(now);
-    start.setHours(sh, sm, 0, 0);
-
-    const end = new Date(now);
-    end.setHours(eh, em, 0, 0);
-
-    return now >= start && now <= end;
-  }
+    private readonly finalTradeRepo: MongoRepository<FinalTradeToBePlacedEntity>,
+    private readonly configService: ConfigService,
+  ) {}
 
   /**
    * Create all saved trades
    *
    */
   async createFinalTrades(signal: TradingViewSignalEntity, configs: any[]) {
-     this.logger.log('🚀 Starting generating signals cycle');
-     
-// time check
-const exchange = signal.exchange;
+    this.logger.log('🚀 Starting generating signals cycle');
 
-// Apply time restriction ONLY for restricted exchanges
-if (
-  this.TIME_RESTRICTED_EXCHANGES.has(exchange) &&
-  !this.isWithinTradingTime()
-) {
-  this.logger.warn(
-    `⏰ Trading time over. Not creating trade signal for ${exchange}|${signal.token}|${signal.symbol}`
-  );
-  return; // stop this signal only
-}
+    // =====================================================
+    // 🔹 IST TIME CHECK
+    // =====================================================
+    // time check
+    const exchange = signal.exchange;
 
-// time check ends
+    // Apply time restriction ONLY for restricted exchanges
+    if (!isTradingAllowedForExchange(exchange, this.configService)) {
+      this.logger.warn(
+        `⏰ Trading time restricted. Skipping signal for ${exchange}|${signal.token}|${signal.symbol}`,
+      );
+      return;
+    }
 
-// ✅ next steps: create trade signal data
+    // time check ends
 
+    // ✅ next steps: create trade signal data
 
     const tradeDate = getISTTradeDate();
 
@@ -179,4 +142,3 @@ if (
     }
   }
 }
-

@@ -6,6 +6,7 @@ import { OrdersService } from 'src/orders/orders.service';
 import { NormalizedTick } from './stoploss-target.types';
 import { ConfigService } from '@nestjs/config';
 import { TargetManager } from './target/target.manager';
+import { isTradingAllowedForExchange } from 'src/common/utils/trading-time.util';
 
 interface CachedBlock<T> {
   data: T;
@@ -215,6 +216,21 @@ export class StoplossTargetService implements OnModuleInit {
 
     if (!position) return;
 
+    // ============================
+    // Time Restriction Check
+    // ============================
+
+    // this.logger.log(` Checking trading time for positions : `, position);
+    const exchange = position.exch;
+    // this.logger.log(` Checking trading time for exchange : ${exchange} `);
+
+    if (!isTradingAllowedForExchange(exchange, this.ConfigService)) {
+      this.logger.warn(
+        `⏰ Trading time restricted. Skipping Action on SL-TRAIL / TARGET Findings for ${exchange}|${exchange.token}|${exchange.symbol}`,
+      );
+      return;
+    }
+
     const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
     const qty = Math.abs(Number(position.netqty));
 
@@ -241,7 +257,7 @@ export class StoplossTargetService implements OnModuleInit {
     });
 
     // ============================
-    // 🔥 TARGET ACQUIREMENT LOGIC 
+    // 🔥 TARGET ACQUIREMENT LOGIC
     // ============================
 
     await this.targetManager.checkAndProcessTarget({
