@@ -203,6 +203,8 @@ export class StoplossTargetService implements OnModuleInit {
     if (!tick) return;
     if (!this.isCacheFresh()) return;
 
+    // this.logger.log(`Processing tick for token: ${tick.tk} : `, tick);
+
     const position = this.findMatchingOpenPosition(tick);
     const pendingSL = this.findPendingSL(tick);
 

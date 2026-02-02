@@ -8,6 +8,7 @@ import {
   canAppendAction,
   getTargetTrackKey,
 } from './target.helpers';
+import { processTimeBasedExit } from './timeBasedExit.helper';
 
 export class TargetManager {
   private readonly TARGET_PERCENT: number;
@@ -68,6 +69,29 @@ export class TargetManager {
     // 🔑 per-trade tracking key
     const trackKey = getTargetTrackKey(token, entryOrderId);
     const track = readTargetTrack(trackKey);
+
+    // need to keep this above trade already closed fucntion check
+    // ===============================
+    // 🚀 Close open positions ORDER if no new high low hit in given N number of last minutes
+    // ===============================
+    await processTimeBasedExit({
+      tick,
+      netPosition,
+      instrument,
+      exitAfterMinutes: Number(this.config.get('TIME_EXIT_MINUTES', 15)),
+      closePositionFn: async (side, qty) => {
+        await this.ordersService.placeOrder({
+          buy_or_sell: side === 'BUY' ? 'S' : 'B',
+          product_type: netPosition.prd,
+          exchange: tick.e,
+          tradingsymbol: instrument.tradingSymbol,
+          quantity: qty,
+          price_type: 'MKT',
+          retention: 'DAY',
+          remarks: 'AUTO_TIME_EXIT',
+        });
+      },
+    });
 
     // ===============================
     // 🚫 TRADE ALREADY CLOSED
