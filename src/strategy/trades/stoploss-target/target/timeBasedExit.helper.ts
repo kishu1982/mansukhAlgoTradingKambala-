@@ -123,9 +123,9 @@ export async function processTimeBasedExit({
     data.reference.updatedAtIST = nowIST;
     data.lastImprovementTime = now;
 
-    console.log(
-      `📈 ${symbol} | New ${side === 'BUY' ? 'HIGH' : 'LOW'} ${ltp} @ ${nowIST}`,
-    );
+    // console.log(
+    //   `📈 ${symbol} | New ${side === 'BUY' ? 'HIGH' : 'LOW'} ${ltp} @ ${nowIST}`,
+    // );
 
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     return;

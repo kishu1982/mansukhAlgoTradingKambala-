@@ -20,44 +20,57 @@ export function isTradingAllowedForExchange(
   const startTime = configService.get<string>('TRADING_START_TIMES', '09:20');
   const endTime = configService.get<string>('TRADING_END_TIME', '15:25');
 
-  //   console.log(
-  //     ` Trading Time Check for ${exchange} : ${startTime} - ${endTime} `,
-  //   );
+  // 🔒 Break time config
+  const breakEnabled =
+    configService.get<string>('TRADING_BREAK_ENABLED', 'false') === 'true';
+
+  const breakStart = configService.get<string>(
+    'TRADING_BREAK_START_TIME',
+    '13:15',
+  );
+
+  const breakEnd = configService.get<string>('TRADING_BREAK_END_TIME', '13:45');
 
   // Current IST time
   const now = new Date(
     new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }),
   );
 
+  // ============================
+  // Market hours check
+  // ============================
   const [sh, sm] = startTime.split(':').map(Number);
   const [eh, em] = endTime.split(':').map(Number);
 
-  const start = new Date(now);
-  start.setHours(sh, sm, 0, 0);
+  const marketStart = new Date(now);
+  marketStart.setHours(sh, sm, 0, 0);
 
-  const end = new Date(now);
-  end.setHours(eh, em, 0, 0);
+  const marketEnd = new Date(now);
+  marketEnd.setHours(eh, em, 0, 0);
 
-  return now >= start && now <= end;
-}
+  if (now < marketStart || now > marketEnd) {
+    return false;
+  }
 
-/*
-=============================================
-// cunction to be called 
-    // ============================
-    // Time Restriction Check
-    // ============================
-    import { isTradingAllowedForExchange } from 'src/common/utils/trading-time.util';
+  // ============================
+  // Break time check (if enabled)
+  // ============================
+  if (breakEnabled) {
+    const [bh, bm] = breakStart.split(':').map(Number);
+    const [ehh, emm] = breakEnd.split(':').map(Number);
 
-    const exchange = position.exchange;
+    const breakStartTime = new Date(now);
+    breakStartTime.setHours(bh, bm, 0, 0);
 
-    if (!isTradingAllowedForExchange(exchange, this.ConfigService)) {
-      this.logger.warn(
-        `⏰ Trading time restricted. Skipping signal for ${exchange}|${exchange.token}|${exchange.symbol}`,
-      );
-      return;
+    const breakEndTime = new Date(now);
+    breakEndTime.setHours(ehh, emm, 0, 0);
+
+    // ❌ Inside break window → block trading
+    if (now >= breakStartTime && now <= breakEndTime) {
+      return false;
     }
+  }
 
-
-=============================================
-*/
+  // ✅ Allowed
+  return true;
+}
