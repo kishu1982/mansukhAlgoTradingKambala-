@@ -67,6 +67,7 @@ export function isTradingAllowedForExchange(
 
     // ❌ Inside break window → block trading
     if (now >= breakStartTime && now <= breakEndTime) {
+      console.log(`TradingTiming-Logic ⏸ Trading break time from ${breakStart} to ${breakEnd} IST`);
       return false;
     }
   }
