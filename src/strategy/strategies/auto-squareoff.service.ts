@@ -11,8 +11,22 @@ export class AutoSquareOffService {
    * ⏰ CONFIGURABLE IST TIMES
    * Format: HH:mm (24-hour)
    */
-  private readonly SQUARE_OFF_START_TIME = '15:25';
-  private readonly SQUARE_OFF_END_TIME?: string = '16:00'; // ⬅ optional (set undefined to disable)
+
+  /**
+   * ⏰ MULTIPLE AUTO SQUARE-OFF WINDOWS (IST)
+   * - end optional → if undefined, keeps checking after start
+   */
+  private readonly SQUARE_OFF_WINDOWS: Array<{
+    start: string;
+    end?: string;
+  }> = [
+    { start: '13:24', end: '13:30' },
+    { start: '14:44', end: '14:50' },
+    { start: '15:14', end: '16:20' },
+    // { start: '10:45', end: '10:55' }, // testing
+    // { start: '15:25' }, // no end → infinite after start
+  ];
+
   private activateAutoSquareOff = true;
 
   /*
@@ -47,32 +61,38 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
     return { hour, minute };
   }
 
-  private isWithinSquareOffWindow(): boolean {
+  private isWithinSquareOffWindow(): {
+    active: boolean;
+    window?: { start: string; end?: string };
+  } {
     const istNow = this.getISTDate();
     const h = istNow.getHours();
     const m = istNow.getMinutes();
 
-    const start = this.parseTime(this.SQUARE_OFF_START_TIME);
-    const end = this.SQUARE_OFF_END_TIME
-      ? this.parseTime(this.SQUARE_OFF_END_TIME)
-      : null;
+    for (const window of this.SQUARE_OFF_WINDOWS) {
+      const start = this.parseTime(window.start);
+      const end = window.end ? this.parseTime(window.end) : null;
 
-    // ⛔ Before start time
-    if (h < start.hour || (h === start.hour && m < start.minute)) {
-      return false;
+      // ⛔ before start
+      if (h < start.hour || (h === start.hour && m < start.minute)) {
+        continue;
+      }
+
+      // ✅ no end → valid forever after start
+      if (!end) {
+        return { active: true, window };
+      }
+
+      // ⛔ after end
+      if (h > end.hour || (h === end.hour && m > end.minute)) {
+        continue;
+      }
+
+      // ✅ inside window
+      return { active: true, window };
     }
 
-    // ✅ No end time → keep checking after start
-    if (!end) {
-      return true;
-    }
-
-    // ⛔ After end time
-    if (h > end.hour || (h === end.hour && m > end.minute)) {
-      return false;
-    }
-
-    return true;
+    return { active: false };
   }
 
   // =====================================================
@@ -85,11 +105,12 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
       this.logger.log('Auto Square-Off is deactivated. Skipping check.');
       return;
     }
-    if (!this.isWithinSquareOffWindow()) return;
+    const windowCheck = this.isWithinSquareOffWindow();
+    if (!windowCheck.active) return;
 
     this.logger.log(
-      `⏰ Auto Square-Off Window Active (${this.SQUARE_OFF_START_TIME} → ${
-        this.SQUARE_OFF_END_TIME ?? '∞'
+      `⏰ Auto Square-Off Window Active (${windowCheck.window!.start} → ${
+        windowCheck.window!.end ?? '∞'
       } IST)`,
     );
 
@@ -108,16 +129,16 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
 
         const closeSide = netQty > 0 ? 'SELL' : 'BUY';
         const closeQty = Math.abs(netQty);
-
+        console.log('position data at auto-squareoff:', pos);
         this.logger.log(
-          `🔁 Square-Off → ${pos.symname} | ${closeSide} ${closeQty}`,
+          `🔁 Square-Off → ${pos.tsym} | ${closeSide} ${closeQty}`,
         );
 
         await this.orderService.placeOrder({
           buy_or_sell: closeSide === 'BUY' ? 'B' : 'S',
           product_type: 'I',
           exchange: pos.exch,
-          tradingsymbol: pos.symname,
+          tradingsymbol: pos.tsym,
           quantity: closeQty,
           price_type: 'MKT',
           price: 0,
@@ -125,8 +146,8 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
           discloseqty: 0,
           retention: 'DAY',
           amo: 'NO',
-          remarks: `AUTO SQUARE-OFF ${this.SQUARE_OFF_START_TIME}-${
-            this.SQUARE_OFF_END_TIME ?? '∞'
+          remarks: `AUTO SQUARE-OFF ${windowCheck.window!.start}-${
+            windowCheck.window!.end ?? '∞'
           } IST`,
         });
       }
