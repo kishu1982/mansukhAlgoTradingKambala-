@@ -1,4 +1,10 @@
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+
+enum TradeSide {
+  BUY = 'BUY',
+  SELL = 'SELL',
+  EXIT = 'EXIT',
+}
 
 export class TradeLegDto {
   @IsString()
@@ -15,6 +21,9 @@ export class TradeLegDto {
   @IsOptional()
   symbolName?: string;
 
-  @IsEnum(['BUY', 'SELL'])
-  side: 'BUY' | 'SELL';
+  @IsEnum(TradeSide, { message: 'side must be one of BUY, SELL, EXIT' })
+  @IsNotEmpty({
+    message: 'side is required',
+  })
+  side: TradeSide;
 }

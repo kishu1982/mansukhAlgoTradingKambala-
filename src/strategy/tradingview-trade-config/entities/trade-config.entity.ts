@@ -32,7 +32,7 @@ export class TradeConfigEntity {
   quantityLots: number;
 
   @Column()
-  side: 'BUY' | 'SELL';
+  side: 'BUY' | 'SELL' | 'EXIT';
 
   @Column()
   productType: 'INTRADAY' | 'NORMAL' | 'DELIVERY';

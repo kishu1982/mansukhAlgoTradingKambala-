@@ -4,8 +4,16 @@ import {
   IsNumber,
   IsIn,
   IsNotEmpty,
+  IsEnum,
 } from 'class-validator';
 
+
+
+ enum TradeSide {
+   BUY = 'BUY',
+   SELL = 'SELL',
+   EXIT = 'EXIT',
+ }
 export class TradingViewWebhookDto {
   @IsNotEmpty()
   @IsString()
@@ -19,9 +27,15 @@ export class TradingViewWebhookDto {
   @IsString()
   token: string;
 
-  @IsNotEmpty()
-  @IsIn(['BUY', 'SELL'])
-  side: 'BUY' | 'SELL';
+  // @IsNotEmpty({ message: 'side is required CapsOn : BUY, SELL,EXIT' })
+  // @IsIn(['BUY', 'SELL', 'EXIT'])
+  // side: 'BUY' | 'SELL' | 'EXIT';
+
+  @IsEnum(TradeSide, { message: 'side must be one of BUY, SELL, EXIT' })
+  @IsNotEmpty({
+    message: 'side is required',
+  })
+  side: TradeSide;
 
   @IsOptional()
   @IsNumber()

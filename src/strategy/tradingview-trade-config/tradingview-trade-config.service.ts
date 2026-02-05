@@ -37,6 +37,12 @@ export class TradingviewTradeConfigService {
 
     let tradeLegs: TradeLeg[] = [];
 
+    // Normalize EXIT logic
+    const normalizedSide: 'BUY' | 'SELL' =
+      dto.side === 'EXIT' ? 'BUY' : dto.side;
+
+    const normalizedQuantity = dto.side === 'EXIT' ? 0 : dto.quantityLots;
+
     try {
       // 🔹 Build sub legs
       // 🟢 CASE 1: SINGLE LEG (AUTO)
@@ -46,8 +52,8 @@ export class TradingviewTradeConfigService {
             tokenNumber: dto.tokenNumber,
             exchange: dto.exchange,
             symbolName: dto.symbolName,
-            quantityLots: dto.quantityLots,
-            side: dto.side,
+            quantityLots: normalizedQuantity,
+            side: normalizedSide,
             productType: dto.productType,
             strategyName: dto.strategyName,
             legs: 1,
@@ -64,26 +70,36 @@ export class TradingviewTradeConfigService {
           );
         }
 
-        tradeLegs = dto.toBeTradedOn.map((leg) => ({
-          tokenNumber: leg.tokenNumber,
-          exchange: leg.exchange,
-          // ✅ USE LEG SYMBOL IF PROVIDED, ELSE FALLBACK
-          symbolName: leg.symbolName?.trim() || dto.symbolName,
-          quantityLots: leg.quantityLots,
-          side: leg.side,
-          productType: dto.productType,
-          strategyName: dto.strategyName,
-          legs: dto.legs,
-        }));
+        tradeLegs = dto.toBeTradedOn.map((leg) => {
+          const legSide: 'BUY' | 'SELL' =
+            leg.side === 'EXIT' ? 'BUY' : leg.side;
+
+          // const legQty = leg.side === 'EXIT' ? 0 : leg.quantityLots;
+          const legQty = dto.side === 'EXIT' ? 0 : leg.quantityLots;
+
+          return {
+            tokenNumber: leg.tokenNumber,
+            exchange: leg.exchange,
+            symbolName: leg.symbolName?.trim() || dto.symbolName,
+            quantityLots: legQty,
+            side: legSide,
+            productType: dto.productType,
+            strategyName: dto.strategyName,
+            legs: dto.legs,
+          };
+        });
       }
 
       const existing = await this.tradeConfigRepo.findOne({ where: filter });
+      this.logger.log('dto data to be saved: ' + JSON.stringify(dto));
 
       if (existing) {
         existing.strategyName = dto.strategyName;
         existing.exchange = dto.exchange;
         existing.quantityLots = dto.quantityLots;
         existing.side = dto.side;
+        // existing.side = normalizedSide;
+        // existing.quantityLots = normalizedQuantity;
         existing.productType = dto.productType;
         existing.legs = dto.legs;
         existing.signalStatus = dto.signalStatus;
@@ -93,8 +109,12 @@ export class TradingviewTradeConfigService {
         return await this.tradeConfigRepo.save(existing);
       }
 
+      // const newConfig = this.tradeConfigRepo.create({
+      //   ...dto,
       const newConfig = this.tradeConfigRepo.create({
         ...dto,
+        //side: normalizedSide,
+        //quantityLots: normalizedQuantity,
         isEnabled: dto.signalStatus === 'ACTIVE',
         toBeTradedOn: tradeLegs,
       });
@@ -176,7 +196,7 @@ export class TradingviewTradeConfigService {
     }
   }
 
-  async findMatchingConfigs(token: string, side: 'BUY' | 'SELL') {
+  async findMatchingConfigs(token: string, side: 'BUY' | 'SELL' | 'EXIT') {
     const normalizedToken = String(token).trim();
     const normalizedSide = side.trim().toUpperCase();
     this.logger.log(

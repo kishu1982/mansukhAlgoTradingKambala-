@@ -16,7 +16,7 @@ export class TradingViewSignalEntity {
   token?: string;
 
   @Column()
-  side: 'BUY' | 'SELL';
+  side: 'BUY' | 'SELL' | 'EXIT';
 
   @Column()
   price?: number;

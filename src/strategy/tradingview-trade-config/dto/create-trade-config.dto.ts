@@ -11,6 +11,14 @@ import {
 } from 'class-validator';
 import { TradeLegDto } from './tarde-leg.dto';
 
+ enum TradeSide {
+  BUY = 'BUY',
+  SELL = 'SELL',
+  EXIT = 'EXIT',
+}
+
+
+
 export class CreateTradeConfigDto {
   @IsString()
   @IsNotEmpty()
@@ -34,9 +42,11 @@ export class CreateTradeConfigDto {
   @Min(0, { message: 'quantityLots cannot be negative' })
   quantityLots: number;
 
-  @IsEnum(['BUY', 'SELL'])
-  @IsNotEmpty()
-  side: 'BUY' | 'SELL';
+  @IsEnum(TradeSide, { message: 'side must be one of BUY, SELL, EXIT' })
+  @IsNotEmpty({
+    message: 'side is required',
+  })
+  side: TradeSide;
 
   @IsEnum(['INTRADAY', 'NORMAL', 'DELIVERY'])
   @IsNotEmpty()

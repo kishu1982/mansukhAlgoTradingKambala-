@@ -149,7 +149,7 @@ export class TradingViewStrategy {
   // 🔹 ORDER
   // =====================================================
   private async placeMarketOrder(
-    side: 'BUY' | 'SELL',
+    side: 'BUY' | 'SELL' | 'EXIT',
     quantity: number,
     payload: TradingViewWebhookDto,
     tradingSymbol: string,
@@ -201,7 +201,7 @@ export class TradingViewStrategy {
   // =====================================================
   private async closeOppositeIfAny(
     netQty: number,
-    payloadSide: 'BUY' | 'SELL',
+    payloadSide: 'BUY' | 'SELL' | 'EXIT',
     tradingSymbol: string,
     payload: TradingViewWebhookDto,
   ): Promise<boolean> {
