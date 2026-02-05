@@ -956,4 +956,6 @@ export class StoplossTargetService implements OnModuleInit {
       return Number(rawPrice.toFixed(2));
     }
   }
+
+  
 }

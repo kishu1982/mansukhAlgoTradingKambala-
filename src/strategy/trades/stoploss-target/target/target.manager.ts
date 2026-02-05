@@ -9,6 +9,7 @@ import {
   getTargetTrackKey,
 } from './target.helpers';
 import { processTimeBasedExit } from './timeBasedExit.helper';
+import { IsNumber, IsString } from 'class-validator';
 
 export class TargetManager {
   private readonly TARGET_PERCENT: number;
@@ -35,6 +36,8 @@ export class TargetManager {
   }) {
     const token = tick.tk;
     const ltp = tick.lp;
+
+
 
     // 🔒 no position → do nothing
     const netQty = Math.abs(Number(netPosition.netqty));
@@ -73,24 +76,13 @@ export class TargetManager {
     // need to keep this above trade already closed fucntion check
     // ===============================
     // 🚀 Close open positions ORDER if no new high low hit in given N number of last minutes
+    // simply calling private fucntion of this class
     // ===============================
-    await processTimeBasedExit({
+    await this.handleTimeBasedExit({
       tick,
       netPosition,
       instrument,
-      exitAfterMinutes: Number(this.config.get('TIME_EXIT_MINUTES', 15)),
-      closePositionFn: async (side, qty) => {
-        await this.ordersService.placeOrder({
-          buy_or_sell: side === 'BUY' ? 'S' : 'B',
-          product_type: netPosition.prd,
-          exchange: tick.e,
-          tradingsymbol: instrument.tradingSymbol,
-          quantity: qty,
-          price_type: 'MKT',
-          retention: 'DAY',
-          remarks: 'AUTO_TIME_EXIT',
-        });
-      },
+      entryOrderId,
     });
 
     // ===============================
@@ -204,6 +196,42 @@ export class TargetManager {
       targetPrice,
       netQty,
       closeQty,
+    });
+  }
+
+  // need to keep this above trade already closed fucntion check
+  //  =============================== //
+  // 🚀 Close open positions ORDER if no new high low hit in given N number of last minutes
+  //  ===============================
+  private async handleTimeBasedExit({
+    tick,
+    netPosition,
+    instrument,
+    entryOrderId, 
+  }: {
+    tick: { tk: string; e: string; lp: number };
+    netPosition: any;
+    instrument: any;
+    entryOrderId: string;
+  }) {
+    await processTimeBasedExit({
+      tick,
+      netPosition,
+      instrument,
+      entryOrderId,
+      exitAfterMinutes: Number(this.config.get('TIME_EXIT_MINUTES', 15)),
+      closePositionFn: async (side, qty) => {
+        await this.ordersService.placeOrder({
+          buy_or_sell: side === 'BUY' ? 'S' : 'B',
+          product_type: netPosition.prd,
+          exchange: tick.e,
+          tradingsymbol: instrument.tradingSymbol,
+          quantity: qty,
+          price_type: 'MKT',
+          retention: 'DAY',
+          remarks: 'AUTO_TIME_EXIT',
+        });
+      },
     });
   }
 }

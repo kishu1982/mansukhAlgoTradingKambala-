@@ -27,8 +27,8 @@ type StoredTickData = {
   ticks: TickPoint[];
 };
 
-function getFilePath(token: string, symbol: string) {
-  return path.join(DATA_DIR, `${token}_${symbol}.json`);
+function getFilePath(token: string, symbol: string, tradeId: string) {
+  return path.join(DATA_DIR, `${token}_${symbol}_trNo${tradeId}.json`);
 }
 
 // ===============================
@@ -38,12 +38,14 @@ export async function processTimeBasedExit({
   tick,
   netPosition,
   instrument,
+  entryOrderId,
   exitAfterMinutes,
   closePositionFn,
 }: {
   tick: { tk: string; lp: number };
   netPosition: any;
   instrument: any;
+  entryOrderId: string;
   exitAfterMinutes: number;
   closePositionFn: (side: 'BUY' | 'SELL', qty: number) => Promise<void>;
 }) {
@@ -53,9 +55,13 @@ export async function processTimeBasedExit({
 
   const netQty = Number(netPosition.netqty);
 
+  console.log(
+    `Received tick for ${symbol} | NetQty=${netQty} | LTP=${ltp} | Window=${exitAfterMinutes}m`,
+  );
+
   // 🔒 no open position → cleanup
   if (netQty === 0) {
-    cleanup(token, symbol);
+    cleanup(token, symbol, entryOrderId);
     return;
   }
 
@@ -64,7 +70,7 @@ export async function processTimeBasedExit({
   );
 
   const side: 'BUY' | 'SELL' = netQty > 0 ? 'BUY' : 'SELL';
-  const filePath = getFilePath(token, symbol);
+  const filePath = getFilePath(token, symbol, entryOrderId);
 
   let data: StoredTickData;
   const now = Date.now();
@@ -144,7 +150,7 @@ export async function processTimeBasedExit({
     );
 
     await closePositionFn(side, Math.abs(netQty));
-    cleanup(token, symbol);
+    cleanup(token, symbol, entryOrderId);
     return;
   }
 
@@ -154,11 +160,11 @@ export async function processTimeBasedExit({
 // ===============================
 // CLEANUP
 // ===============================
-function cleanup(token: string, symbol: string) {
-  const filePath = getFilePath(token, symbol);
+function cleanup(token: string, symbol: string, tradeId: string) {
+  const filePath = getFilePath(token, symbol, tradeId);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
-    console.log('🧹 Cleaned tick file:', token, symbol);
+    console.log('🧹 Cleaned tick file:', token, symbol, tradeId);
   }
 }
 
