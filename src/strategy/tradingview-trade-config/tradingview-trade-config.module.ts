@@ -4,6 +4,7 @@ import { TradingviewTradeConfigController } from './tradingview-trade-config.con
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TradeConfigEntity } from './entities/trade-config.entity';
 
+
 @Module({
   imports: [TypeOrmModule.forFeature([TradeConfigEntity])],
   providers: [TradingviewTradeConfigService],
