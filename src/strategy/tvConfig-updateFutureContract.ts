@@ -15,7 +15,7 @@ export class TvConfigUpdateFutureContract implements OnModuleInit {
   // ⚙️ STRIKE SETTINGS
   // =====================================================
   private readonly OTM_PERCENT = 0.015; // means 0.25%
-  private readonly STRIKE_STEP = 100; // NIFTY strike interval
+  private readonly STRIKE_STEP = 50; // NIFTY strike interval
   // ===============================
   // 📦 INSTRUMENT MASTER
   // ===============================

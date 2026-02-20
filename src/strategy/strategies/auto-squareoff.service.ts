@@ -7,6 +7,11 @@ import { ConfigService } from '@nestjs/config';
 export class AutoSquareOffService {
   private readonly logger = new Logger(AutoSquareOffService.name);
 
+  private isRunning = false;
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   /**
    * ⏰ CONFIGURABLE IST TIMES
    * Format: HH:mm (24-hour)
@@ -102,11 +107,19 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
   @Cron('0 */1 * * * *', { timeZone: 'Asia/Kolkata' })
   async autoSquareOff(): Promise<void> {
     if (!this.activateAutoSquareOff) {
-      this.logger.log('Auto Square-Off is deactivated. Skipping check.');
       return;
     }
+
+    // 🚫 Prevent overlapping executions
+    if (this.isRunning) {
+      this.logger.warn('Auto Square-Off already running. Skipping...');
+      return;
+    }
+
     const windowCheck = this.isWithinSquareOffWindow();
     if (!windowCheck.active) return;
+
+    this.isRunning = true;
 
     this.logger.log(
       `⏰ Auto Square-Off Window Active (${windowCheck.window!.start} → ${
@@ -115,46 +128,124 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
     );
 
     try {
-      const netPositions = await this.orderService.getNetPositions();
+      let hasOpenPositions = true;
 
-      if (!netPositions?.data || !Array.isArray(netPositions.data)) {
-        this.logger.warn('⚠️ No net positions found');
-        return;
+      while (hasOpenPositions) {
+        const netPositions = await this.orderService.getNetPositions();
+
+        if (!netPositions?.data || !Array.isArray(netPositions.data)) {
+          this.logger.warn('⚠️ No net positions found');
+          break;
+        }
+
+        hasOpenPositions = false;
+
+        for (const pos of netPositions.data) {
+          const netQty = Number(pos.netqty);
+
+          if (!netQty || netQty === 0) continue;
+
+          hasOpenPositions = true; // still positions open
+
+          const closeSide = netQty > 0 ? 'SELL' : 'BUY';
+          const closeQty = Math.abs(netQty);
+
+          this.logger.log(
+            `🔁 Square-Off → ${pos.tsym} | ${closeSide} ${closeQty}`,
+          );
+
+          await this.orderService.placeOrder({
+            buy_or_sell: closeSide === 'BUY' ? 'B' : 'S',
+            product_type: 'I',
+            exchange: pos.exch,
+            tradingsymbol: pos.tsym,
+            quantity: closeQty,
+            price_type: 'MKT',
+            price: 0,
+            trigger_price: 0,
+            discloseqty: 0,
+            retention: 'DAY',
+            amo: 'NO',
+            remarks: `AUTO SQUARE-OFF ${windowCheck.window!.start}-${
+              windowCheck.window!.end ?? '∞'
+            } IST`,
+          });
+
+          // ⏳ wait 2 seconds before next order
+          await this.sleep(2000);
+        }
+
+        // ⏳ Wait before re-checking positions
+        if (hasOpenPositions) {
+          this.logger.log('🔄 Re-checking net positions...');
+          await this.sleep(4000); // wait for exchange update
+        }
       }
 
-      for (const pos of netPositions.data) {
-        const netQty = Number(pos.netqty);
-
-        if (!netQty || netQty === 0) continue;
-
-        const closeSide = netQty > 0 ? 'SELL' : 'BUY';
-        const closeQty = Math.abs(netQty);
-        console.log('position data at auto-squareoff:', pos);
-        this.logger.log(
-          `🔁 Square-Off → ${pos.tsym} | ${closeSide} ${closeQty}`,
-        );
-
-        await this.orderService.placeOrder({
-          buy_or_sell: closeSide === 'BUY' ? 'B' : 'S',
-          product_type: 'I',
-          exchange: pos.exch,
-          tradingsymbol: pos.tsym,
-          quantity: closeQty,
-          price_type: 'MKT',
-          price: 0,
-          trigger_price: 0,
-          discloseqty: 0,
-          retention: 'DAY',
-          amo: 'NO',
-          remarks: `AUTO SQUARE-OFF ${windowCheck.window!.start}-${
-            windowCheck.window!.end ?? '∞'
-          } IST`,
-        });
-      }
-
-      this.logger.log('✅ Auto square-off cycle completed');
+      this.logger.log('✅ All positions squared off successfully');
     } catch (err) {
       this.logger.error('❌ Auto square-off failed', err?.message || err);
+    } finally {
+      this.isRunning = false; // 🔓 release lock
     }
   }
+
+  // @Cron('0 */1 * * * *', { timeZone: 'Asia/Kolkata' })
+  // async autoSquareOff(): Promise<void> {
+  //   if (!this.activateAutoSquareOff) {
+  //     this.logger.log('Auto Square-Off is deactivated. Skipping check.');
+  //     return;
+  //   }
+  //   const windowCheck = this.isWithinSquareOffWindow();
+  //   if (!windowCheck.active) return;
+
+  //   this.logger.log(
+  //     `⏰ Auto Square-Off Window Active (${windowCheck.window!.start} → ${
+  //       windowCheck.window!.end ?? '∞'
+  //     } IST)`,
+  //   );
+
+  //   try {
+  //     const netPositions = await this.orderService.getNetPositions();
+
+  //     if (!netPositions?.data || !Array.isArray(netPositions.data)) {
+  //       this.logger.warn('⚠️ No net positions found');
+  //       return;
+  //     }
+
+  //     for (const pos of netPositions.data) {
+  //       const netQty = Number(pos.netqty);
+
+  //       if (!netQty || netQty === 0) continue;
+
+  //       const closeSide = netQty > 0 ? 'SELL' : 'BUY';
+  //       const closeQty = Math.abs(netQty);
+  //       console.log('position data at auto-squareoff:', pos);
+  //       this.logger.log(
+  //         `🔁 Square-Off → ${pos.tsym} | ${closeSide} ${closeQty}`,
+  //       );
+
+  //       await this.orderService.placeOrder({
+  //         buy_or_sell: closeSide === 'BUY' ? 'B' : 'S',
+  //         product_type: 'I',
+  //         exchange: pos.exch,
+  //         tradingsymbol: pos.tsym,
+  //         quantity: closeQty,
+  //         price_type: 'MKT',
+  //         price: 0,
+  //         trigger_price: 0,
+  //         discloseqty: 0,
+  //         retention: 'DAY',
+  //         amo: 'NO',
+  //         remarks: `AUTO SQUARE-OFF ${windowCheck.window!.start}-${
+  //           windowCheck.window!.end ?? '∞'
+  //         } IST`,
+  //       });
+  //     }
+
+  //     this.logger.log('✅ Auto square-off cycle completed');
+  //   } catch (err) {
+  //     this.logger.error('❌ Auto square-off failed', err?.message || err);
+  //   }
+  // }
 }
