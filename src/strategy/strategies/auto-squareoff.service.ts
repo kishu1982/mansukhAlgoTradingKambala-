@@ -26,7 +26,7 @@ export class AutoSquareOffService {
     end?: string;
   }> = [
     { start: '13:24', end: '13:30' },
-    { start: '14:55', end: '14:60' },
+    { start: '14:55', end: '14:59' },
     { start: '15:14', end: '16:20' },
     // { start: '10:45', end: '10:55' }, // testing
     // { start: '15:25' }, // no end → infinite after start
