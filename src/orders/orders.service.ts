@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { AxiosError } from 'axios';
 import { PlaceOrderDto } from './dto/place-order.dto';
+import { TelegramService } from 'src/telegram/telegram.service';
 
 const NorenRestApi = require('norenrestapi/lib/restapi');
 
@@ -21,6 +22,7 @@ export class OrdersService {
   constructor(
     private readonly tokenService: TokenService,
     private readonly configService: ConfigService,
+    private readonly telegramService: TelegramService, // ⭐ ADD THIS
   ) {
     this.api = new NorenRestApi({});
   }
@@ -190,6 +192,99 @@ export class OrdersService {
   //   }
   // }
 
+  // async placeOrder(order: PlaceOrderDto) {
+  //   const token = this.tokenService.getToken();
+  //   const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
+
+  //   /* ---------------- SANITIZE ---------------- */
+
+  //   const exchange = order.exchange?.trim();
+  //   const tradingsymbol = order.tradingsymbol?.trim();
+
+  //   if (!exchange || !tradingsymbol) {
+  //     throw new BadRequestException('Exchange or Trading Symbol missing');
+  //   }
+
+  //   /* ---------------- BASE PAYLOAD ---------------- */
+
+  //   const jData: any = {
+  //     uid: String(token.UID),
+  //     actid: String(token.Account_ID),
+  //     exch: exchange,
+  //     tsym: tradingsymbol,
+  //     qty: String(Math.floor(order.quantity)),
+  //     prc: '0.0', // ✅ REQUIRED EVEN FOR MKT
+  //     prd: order.product_type,
+  //     trantype: order.buy_or_sell,
+  //     prctyp: order.price_type,
+  //     ret: order.retention ?? 'DAY',
+  //     remarks: order.remarks ?? '',
+  //     ordersource: 'API',
+  //   };
+
+  //   /* ---------------- ORDER TYPE RULES ---------------- */
+
+  //   if (order.price_type === 'LMT' || order.price_type === 'SL-LMT') {
+  //     if (order.price === undefined) {
+  //       throw new BadRequestException('Price required for LMT / SL-LMT');
+  //     }
+  //     jData.prc = String(order.price);
+  //   }
+
+  //   if (order.price_type === 'SL-MKT' || order.price_type === 'SL-LMT') {
+  //     if (order.trigger_price === undefined) {
+  //       throw new BadRequestException('Trigger price required for SL order');
+  //     }
+  //     jData.trgprc = String(order.trigger_price);
+  //   }
+
+  //   /* ---------------- FINAL PAYLOAD (THIS IS KEY) ---------------- */
+
+  //   const payload = `jData=${JSON.stringify(jData)}`;
+
+  //   this.logger.debug(`📤 FINAL RAW PAYLOAD → ${payload}`);
+
+  //   /* ---------------- API CALL ---------------- */
+
+  //   try {
+  //     const response = await axios.post(
+  //       `${baseUrl}/PlaceOrder`,
+  //       payload, // ✅ RAW STRING
+  //       {
+  //         headers: {
+  //           Authorization: `Bearer ${token.Access_token}`,
+  //           'Content-Type': 'application/json', // ✅ SAME AS CURL
+  //         },
+  //         transformRequest: [(d) => d], // 🚨 REQUIRED
+  //         timeout: 10000,
+  //       },
+  //     );
+
+  //     if (response.data?.stat === 'Not_Ok') {
+  //       throw new BadRequestException({
+  //         message: 'Order rejected by broker',
+  //         brokerError: response.data.emsg,
+  //       });
+  //     }
+
+  //     return response.data;
+  //   } catch (error) {
+  //     if (error instanceof AxiosError) {
+  //       throw new BadRequestException({
+  //         message: 'Failed to place order',
+  //         brokerError:
+  //           error.response?.data?.emsg ||
+  //           error.response?.data?.message ||
+  //           error.message,
+  //         statusCode: error.response?.status,
+  //       });
+  //     }
+
+  //     throw new InternalServerErrorException(
+  //       'Unexpected error while placing order',
+  //     );
+  //   }
+  // }
   async placeOrder(order: PlaceOrderDto) {
     const token = this.tokenService.getToken();
     const baseUrl = this.configService.get<string>('NOREN_BASE_URL');
@@ -258,16 +353,41 @@ export class OrdersService {
         },
       );
 
+      // if (response.data?.stat === 'Not_Ok') {
+      //   throw new BadRequestException({
+      //     message: 'Order rejected by broker',
+      //     brokerError: response.data.emsg,
+      //   });
+      // }
+
+      // return response.data;
       if (response.data?.stat === 'Not_Ok') {
+        await this.sendTradeTelegram('REJECTED', order, response.data.emsg);
+
         throw new BadRequestException({
           message: 'Order rejected by broker',
           brokerError: response.data.emsg,
         });
       }
 
+      /* ✅ SUCCESS TELEGRAM */
+      await this.sendTradeTelegram(
+        'SUCCESS',
+        order,
+        `Order No: ${response.data?.norenordno ?? 'N/A'}`,
+      );
+
       return response.data;
     } catch (error) {
       if (error instanceof AxiosError) {
+        await this.sendTradeTelegram(
+          'ERROR',
+          order,
+          error.response?.data?.emsg ||
+            error.response?.data?.message ||
+            error.message,
+        );
+
         throw new BadRequestException({
           message: 'Failed to place order',
           brokerError:
@@ -278,6 +398,7 @@ export class OrdersService {
         });
       }
 
+      await this.sendTradeTelegram('ERROR', order, error.message);
       throw new InternalServerErrorException(
         'Unexpected error while placing order',
       );
@@ -366,7 +487,18 @@ export class OrdersService {
         timeout: 10000,
       });
 
+      // if (response.data?.stat === 'Not_Ok') {
+      //   throw new BadRequestException({
+      //     message: 'Order modification rejected by exchange',
+      //     brokerError: response.data.emsg,
+      //     raw: response.data,
+      //   });
+      // }
+
+      // return response.data;
       if (response.data?.stat === 'Not_Ok') {
+        await this.sendModifyTelegram('REJECTED', data, response.data.emsg);
+
         throw new BadRequestException({
           message: 'Order modification rejected by exchange',
           brokerError: response.data.emsg,
@@ -374,9 +506,22 @@ export class OrdersService {
         });
       }
 
+      /* ✅ SUCCESS TELEGRAM */
+      await this.sendModifyTelegram(
+        'SUCCESS',
+        data,
+        `Order No: ${data.orderno}`,
+      );
+
       return response.data;
     } catch (error) {
       if (error instanceof AxiosError) {
+        await this.sendModifyTelegram(
+          'ERROR',
+          data,
+          error.response?.data?.emsg || error.response?.data || error.message,
+        );
+
         throw new BadRequestException({
           message: 'Modify order failed',
           brokerError:
@@ -384,6 +529,7 @@ export class OrdersService {
         });
       }
 
+      await this.sendModifyTelegram('ERROR', data, error.message);
       throw new InternalServerErrorException(
         'Unexpected error while modifying order',
       );
@@ -1288,6 +1434,71 @@ export class OrdersService {
         message: 'Failed to fetch trade book',
         error: error.message,
       });
+    }
+  }
+
+  // helper to send telgram message once any kind of trade is placed
+
+  private async sendTradeTelegram(
+    type: 'SUCCESS' | 'REJECTED' | 'ERROR',
+    order: PlaceOrderDto,
+    extra?: any,
+  ) {
+    try {
+      const message = `
+📢 <b>ORDER ${type}</b>
+
+Symbol: ${order.tradingsymbol}
+Exchange: ${order.exchange}
+Side: ${order.buy_or_sell === 'B' ? 'BUY' : 'SELL'}
+Qty: ${order.quantity}
+Order Type: ${order.price_type}
+Product: ${order.product_type}
+Price: ${order.price ?? 'MKT'}
+Remark: ${order.remarks ?? 'None'}
+
+${extra ? `Details: ${extra}` : ''}
+
+Time: ${new Date().toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+      })}
+`;
+
+      // ⚡ Non-blocking (VERY IMPORTANT)
+      this.telegramService.sendMessage(message);
+    } catch (err) {
+      this.logger.error('Telegram send failed (ignored)', err.message);
+    }
+  }
+
+  // helper in case order is modified.
+  private async sendModifyTelegram(
+    type: 'SUCCESS' | 'REJECTED' | 'ERROR',
+    data: any,
+    extra?: any,
+  ) {
+    try {
+      const message = `
+🔁 <b>ORDER MODIFY ${type}</b>
+
+Order No: ${data.orderno}
+Symbol: ${data.tradingsymbol}
+Exchange: ${data.exchange}
+New Type: ${data.newprice_type}
+New Price: ${data.newprice ?? 'MKT'}
+Trigger: ${data.newtrigger_price ?? 'N/A'}
+
+${extra ? `Details: ${extra}` : ''}
+
+Time: ${new Date().toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+      })}
+`;
+
+      // ⚡ Non-blocking
+      this.telegramService.sendMessage(message);
+    } catch (err) {
+      this.logger.error('Modify Telegram failed (ignored)', err.message);
     }
   }
 }
