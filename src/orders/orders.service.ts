@@ -507,11 +507,11 @@ export class OrdersService {
       }
 
       /* ✅ SUCCESS TELEGRAM */
-      await this.sendModifyTelegram(
-        'SUCCESS',
-        data,
-        `Order No: ${data.orderno}`,
-      );
+      // await this.sendModifyTelegram(
+      //   'SUCCESS',
+      //   data,
+      //   `Order No: ${data.orderno}`,
+      // );
 
       return response.data;
     } catch (error) {
@@ -529,7 +529,7 @@ export class OrdersService {
         });
       }
 
-      await this.sendModifyTelegram('ERROR', data, error.message);
+       await this.sendModifyTelegram('ERROR', data, error.message);
       throw new InternalServerErrorException(
         'Unexpected error while modifying order',
       );
