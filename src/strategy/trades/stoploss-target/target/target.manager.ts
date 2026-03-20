@@ -14,6 +14,7 @@ import { IsNumber, IsString } from 'class-validator';
 export class TargetManager {
   private readonly TARGET_PERCENT: number;
   private readonly targetLocks = new Set<string>();
+  private readonly TARGET_EXIT_PERCENT: number;
 
   constructor(
     private readonly ordersService: OrdersService,
@@ -22,6 +23,11 @@ export class TargetManager {
     const raw = this.config.get<string>('TARGET_FIRST_PERCENT', '0.25');
     const value = Number(raw);
     this.TARGET_PERCENT = value > 1 ? value / 100 : value;
+
+    // profit booking part to change percentage
+    const rawExit = this.config.get<string>('TARGET_EXIT_PERCENT', '0.5');
+    const exitValue = Number(rawExit);
+    this.TARGET_EXIT_PERCENT = exitValue > 1 ? exitValue / 100 : exitValue;
   }
 
   // main fucntion to check and process target bookin g
@@ -114,8 +120,13 @@ export class TargetManager {
       return;
     }
 
-    const maxCloseQty = Math.floor(netQty / 2);
-    const closeQty = Math.floor(maxCloseQty / lotSize) * lotSize;
+    // const maxCloseQty = Math.floor(netQty / 2);
+    // const closeQty = Math.floor(maxCloseQty / lotSize) * lotSize;
+
+    const rawCloseQty = netQty * this.TARGET_EXIT_PERCENT;
+
+    // lot-safe rounding
+    const closeQty = Math.floor(rawCloseQty / lotSize) * lotSize;
 
     if (closeQty < lotSize) {
       return;
