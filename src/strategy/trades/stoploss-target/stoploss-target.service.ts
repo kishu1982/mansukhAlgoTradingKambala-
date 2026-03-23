@@ -90,9 +90,10 @@ export class StoplossTargetService implements OnModuleInit {
       );
     }
 
-    this.logger.log(
-      `📊 SL config | SL_PERCENT=${this.SL_PERCENT} | FIRST_PROFIT_STAGE=${this.FIRST_PROFIT_STAGE}`,
-    );
+    // this.logger.log(
+    //   `📊 SL config | SL_PERCENT=${this.SL_PERCENT} | FIRST_PROFIT_STAGE=${this.FIRST_PROFIT_STAGE}`,
+    // );
+    this.logger.log(`📊 Dynamic SL config enabled (OPTIDX / FUTIDX mode)`);
 
     // initializing target manager
     this.targetManager = new TargetManager(
@@ -250,23 +251,25 @@ export class StoplossTargetService implements OnModuleInit {
 
     const instrument = this.findInstrument(tick);
     if (!instrument) return;
+    const cfg = this.getConfigForPosition(position); // geting config data of matching positions for target booking
 
     await this.processRisk({
       tick,
       position,
       instrument,
       pendingSL,
+      config: cfg, // ✅ ADD
     });
 
     // ============================
     // 🔥 TARGET ACQUIREMENT LOGIC
     // ============================
-
     await this.targetManager.checkAndProcessTarget({
       tick,
       netPosition: position,
       tradeBook: this.tradeBook.data,
       instrument,
+      config: cfg, // important to pass config data of target price
     });
   }
 
@@ -278,12 +281,23 @@ export class StoplossTargetService implements OnModuleInit {
     position,
     instrument,
     pendingSL,
+    config,
   }: {
     tick: NormalizedTick;
     position: any;
     instrument: any;
     pendingSL: any | null;
+    config: {
+      slPercent: number;
+      firstProfit: number;
+      breakeven: number;
+      targetFirst: number;
+    };
   }) {
+    const SL_PERCENT = config.slPercent;
+    const FIRST_PROFIT_STAGE = config.firstProfit;
+
+    // START ON TICK
     const ltp = tick.lp;
     const side: 'BUY' | 'SELL' = Number(position.netqty) > 0 ? 'BUY' : 'SELL';
     const qty = Math.abs(Number(position.netqty));
@@ -307,8 +321,8 @@ export class StoplossTargetService implements OnModuleInit {
 
         const rawTrigger =
           side === 'BUY'
-            ? entryPrice * (1 - this.SL_PERCENT)
-            : entryPrice * (1 + this.SL_PERCENT);
+            ? entryPrice * (1 - SL_PERCENT)
+            : entryPrice * (1 + SL_PERCENT);
 
         const trigger = this.normalizeTriggerPrice(
           rawTrigger,
@@ -324,7 +338,7 @@ export class StoplossTargetService implements OnModuleInit {
         );
 
         this.logger.log(
-          `DEBUG SL | open=${entryPrice} | SL_PERCENT=${this.SL_PERCENT} | limit price =${limitPrice}| calculated trigger=${trigger}`,
+          `DEBUG SL | open=${entryPrice} | SL_PERCENT=${SL_PERCENT} | limit price =${limitPrice}| calculated trigger=${trigger}`,
         );
         const res = await this.ordersService.placeOrder({
           buy_or_sell: side === 'BUY' ? 'S' : 'B',
@@ -343,7 +357,7 @@ export class StoplossTargetService implements OnModuleInit {
         const orderId = this.extractOrderNo(res);
         if (!orderId) return;
 
-        const standardDiff = entryPrice * this.SL_PERCENT;
+        const standardDiff = entryPrice * SL_PERCENT;
 
         this.appendOrderLog(orderId, {
           action: 'INITIAL_SL_PLACED',
@@ -354,7 +368,7 @@ export class StoplossTargetService implements OnModuleInit {
           openPrice,
           entryPrice,
 
-          slPercentUsed: this.SL_PERCENT,
+          slPercentUsed: SL_PERCENT,
           slDiffUsed: standardDiff,
 
           highestPrice: side === 'BUY' ? entryPrice : undefined,
@@ -396,8 +410,8 @@ export class StoplossTargetService implements OnModuleInit {
 
     const { openPrice, currentSL, highestPrice, lowestPrice, stage } = state;
 
-    const standardDiff = openPrice * this.SL_PERCENT;
-    const firstProfitDiff = standardDiff * this.FIRST_PROFIT_STAGE;
+    const standardDiff = openPrice * SL_PERCENT;
+    const firstProfitDiff = standardDiff * FIRST_PROFIT_STAGE;
 
     let activeDiff = standardDiff;
     let nextStage: 'STANDARD' | 'FIRST_PROFIT' | null = null;
@@ -456,8 +470,8 @@ export class StoplossTargetService implements OnModuleInit {
     const appliedStage = nextStage ?? stage;
     const slPercentUsed =
       appliedStage === 'FIRST_PROFIT'
-        ? this.SL_PERCENT * this.FIRST_PROFIT_STAGE
-        : this.SL_PERCENT;
+        ? SL_PERCENT * FIRST_PROFIT_STAGE
+        : SL_PERCENT;
 
     this.appendOrderLog(orderId, {
       action: 'SL_TRAILED',
@@ -957,5 +971,72 @@ export class StoplossTargetService implements OnModuleInit {
     }
   }
 
-  
+  // ===============================
+  // HELPER TO RESOLVE CONFIG FOR STOPLOSS TRAILING BASED ON OPTINX AND FUTIDX
+  // ===============================
+
+  private getConfigForPosition(position: any) {
+    const inst = position?.instname;
+    const sym = position?.symname;
+
+    // DEFAULT (existing behavior)
+    let slPercent = this.SL_PERCENT;
+    let firstProfit = this.FIRST_PROFIT_STAGE;
+    let breakeven = Number(this.ConfigService.get('BREAKEVEN_STAGE', '0.8'));
+    let targetFirst = Number(
+      this.ConfigService.get('TARGET_FIRST_PERCENT', '0.25'),
+    );
+
+    // ===============================
+    // OPTIDX
+    // ===============================
+    if (inst === 'OPTIDX') {
+      slPercent = this.getEnvNumber('STANDARD_STOPLOSS_PERCENT_OPTIDX', 0.25);
+      firstProfit = this.getEnvNumber('FIRST_PROFIT_STAGE_OPTIDX', 0.6);
+      breakeven = this.getEnvNumber('BREAKEVEN_STAGE_OPTIDX', 0.8);
+      targetFirst = this.getEnvNumber('TARGET_FIRST_PERCENT_OPTIDX', 0.25);
+    }
+
+    // ===============================
+    // FUTIDX
+    // ===============================
+    else if (inst === 'FUTIDX') {
+      // BANKNIFTY special override
+      if (sym === 'BANKNIFTY') {
+        slPercent = this.getEnvNumber(
+          'STANDARD_STOPLOSS_PERCENT_FUTIDX_BANKNIFTY',
+          0.0033,
+        );
+        targetFirst = this.getEnvNumber(
+          'TARGET_FIRST_PERCENT_FUTIDX_BANKNIFTY',
+          0.033,
+        );
+      } else {
+        slPercent = this.getEnvNumber(
+          'STANDARD_STOPLOSS_PERCENT_FUTIDX',
+          0.0025,
+        );
+        targetFirst = this.getEnvNumber('TARGET_FIRST_PERCENT_FUTIDX', 0.025);
+      }
+
+      firstProfit = this.getEnvNumber('FIRST_PROFIT_STAGE_FUTIDX', 0.6);
+      breakeven = this.getEnvNumber('BREAKEVEN_STAGE_FUTIDX', 0.8);
+    }
+
+    return {
+      slPercent,
+      firstProfit,
+      breakeven,
+      targetFirst,
+    };
+  }
+
+  private getEnvNumber(key: string, defaultValue: number): number {
+    const raw = this.ConfigService.get<string>(key, String(defaultValue));
+    const value = Number(raw);
+
+    if (Number.isNaN(value)) return defaultValue;
+
+    return value > 1 ? value / 100 : value;
+  }
 }

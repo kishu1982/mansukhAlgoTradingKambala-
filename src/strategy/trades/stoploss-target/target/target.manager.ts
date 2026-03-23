@@ -36,12 +36,19 @@ export class TargetManager {
     netPosition,
     tradeBook,
     instrument,
+    config, // ✅ ADD
   }: {
     tick: { tk: string; e: string; lp: number };
     netPosition: any;
     tradeBook: any[];
     instrument: any;
+    config?: {
+      targetFirst: number;
+    };
   }) {
+    // defining config target value
+    const TARGET_PERCENT = config?.targetFirst ?? this.TARGET_PERCENT;
+
     const token = tick.tk;
     const ltp = tick.lp;
 
@@ -105,8 +112,8 @@ export class TargetManager {
 
     const targetPrice =
       side === 'BUY'
-        ? entryPrice * (1 + this.TARGET_PERCENT)
-        : entryPrice * (1 - this.TARGET_PERCENT);
+        ? entryPrice * (1 + TARGET_PERCENT)
+        : entryPrice * (1 - TARGET_PERCENT);
 
     if (targetPrice <= 0) return;
 

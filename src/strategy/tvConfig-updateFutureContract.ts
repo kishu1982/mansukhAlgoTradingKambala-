@@ -315,6 +315,16 @@ for each leg:
           }
 
           // ===============================
+          // 🚫 SKIP NON-OPTION INDEX (OPTIDX)
+          // ===============================
+          if (instrument.instrument !== 'OPTIDX') {
+            this.logger.warn(
+              `Skipping replacement -> ${leg.symbolName} is not OPTIDX (found: ${instrument.instrument})`,
+            );
+            continue;
+          }
+
+          // ===============================
           // 📊 Extract required data
           // ===============================
 
