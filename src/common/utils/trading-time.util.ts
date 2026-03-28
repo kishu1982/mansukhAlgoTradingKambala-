@@ -18,7 +18,7 @@ export function isTradingAllowedForExchange(
   }
 
   const startTime = configService.get<string>('TRADING_START_TIMES', '09:29');
-  const endTime = configService.get<string>('TRADING_END_TIME', '15:25');
+  const endTime = configService.get<string>('TRADING_END_TIME', '14:45');
 
   // 🔒 Break time config
   const breakEnabled =
@@ -26,10 +26,10 @@ export function isTradingAllowedForExchange(
 
   const breakStart = configService.get<string>(
     'TRADING_BREAK_START_TIME',
-    '12:45',
+    '12:00',
   );
 
-  const breakEnd = configService.get<string>('TRADING_BREAK_END_TIME', '14:12');
+  const breakEnd = configService.get<string>('TRADING_BREAK_END_TIME', '13:45');
 
   // Current IST time
   const now = new Date(
