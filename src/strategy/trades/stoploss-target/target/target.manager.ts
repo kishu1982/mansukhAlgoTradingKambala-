@@ -159,13 +159,29 @@ export class TargetManager {
         return;
       }
 
+      // await this.ordersService.placeOrder({
+      //   buy_or_sell: side === 'BUY' ? 'S' : 'B',
+      //   product_type: netPosition.prd,
+      //   exchange: tick.e,
+      //   tradingsymbol: instrument.tradingSymbol,
+      //   quantity: closeQty,
+      //   price_type: 'MKT',
+      //   retention: 'DAY',
+      //   remarks: 'AUTO_TARGET_50_PERCENT',
+      // });
+      const roundToTick = (price: number) => Math.round(price * 20) / 20;
+
+      const limitPrice = roundToTick(side === 'BUY' ? ltp - 0.5 : ltp + 0.5);
+
       await this.ordersService.placeOrder({
         buy_or_sell: side === 'BUY' ? 'S' : 'B',
         product_type: netPosition.prd,
         exchange: tick.e,
         tradingsymbol: instrument.tradingSymbol,
         quantity: closeQty,
-        price_type: 'MKT',
+        price_type: 'LMT',
+        price: limitPrice,
+        trigger_price: 0,
         retention: 'DAY',
         remarks: 'AUTO_TARGET_50_PERCENT',
       });
@@ -381,13 +397,31 @@ export class TargetManager {
       entryOrderId,
       exitAfterMinutes: Number(this.config.get('TIME_EXIT_MINUTES', 15)),
       closePositionFn: async (side, qty) => {
+        // await this.ordersService.placeOrder({
+        //   buy_or_sell: side === 'BUY' ? 'S' : 'B',
+        //   product_type: netPosition.prd,
+        //   exchange: tick.e,
+        //   tradingsymbol: instrument.tradingSymbol,
+        //   quantity: qty,
+        //   price_type: 'MKT',
+        //   retention: 'DAY',
+        //   remarks: 'AUTO_TIME_EXIT',
+        // });
+        const ltp = tick.lp;
+
+        const roundToTick = (price: number) => Math.round(price * 20) / 20;
+
+        const limitPrice = roundToTick(side === 'BUY' ? ltp - 0.5 : ltp + 0.5);
+
         await this.ordersService.placeOrder({
           buy_or_sell: side === 'BUY' ? 'S' : 'B',
           product_type: netPosition.prd,
           exchange: tick.e,
           tradingsymbol: instrument.tradingSymbol,
           quantity: qty,
-          price_type: 'MKT',
+          price_type: 'LMT',
+          price: limitPrice,
+          trigger_price: 0,
           retention: 'DAY',
           remarks: 'AUTO_TIME_EXIT',
         });
