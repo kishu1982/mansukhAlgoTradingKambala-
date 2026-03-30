@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { OrdersService } from 'src/orders/orders.service';
 import { ConfigService } from '@nestjs/config';
+import { MarketService } from 'src/market/market.service';
 
 @Injectable()
 export class AutoSquareOffService {
@@ -43,6 +44,7 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
   constructor(
     private readonly orderService: OrdersService,
     private readonly ConfigService: ConfigService,
+    private readonly marketService: MarketService, // ✅ ADD THIS
   ) {
     this.activateAutoSquareOff =
       this.ConfigService.get<string>('ACTIVATE_AUTO_SQUARE_OFF', 'false') ===
@@ -154,23 +156,39 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
             `🔁 Square-Off → ${pos.tsym} | ${closeSide} ${closeQty}`,
           );
 
-          await this.orderService.placeOrder({
-            buy_or_sell: closeSide === 'BUY' ? 'B' : 'S',
-            product_type: 'I',
-            exchange: pos.exch,
-            tradingsymbol: pos.tsym,
-            quantity: closeQty,
-            price_type: 'MKT',
-            price: 0,
-            trigger_price: 0,
-            discloseqty: 0,
-            retention: 'DAY',
-            amo: 'NO',
+          // await this.orderService.placeOrder({
+          //   buy_or_sell: closeSide === 'BUY' ? 'B' : 'S',
+          //   product_type: 'I',
+          //   exchange: pos.exch,
+          //   tradingsymbol: pos.tsym,
+          //   quantity: closeQty,
+          //   price_type: 'MKT',
+          //   price: 0,
+          //   trigger_price: 0,
+          //   discloseqty: 0,
+          //   retention: 'DAY',
+          //   amo: 'NO',
+          //   remarks: `AUTO SQUARE-OFF ${windowCheck.window!.start}-${
+          //     windowCheck.window!.end ?? '∞'
+          //   } IST`,
+          // });
+          const success = await this.placeSquareOffWithRetry({
+            exch: pos.exch,
+            token: pos.token, // ⚠️ IMPORTANT: ensure token exists in pos
+            tsym: pos.tsym,
+            qty: closeQty,
+            side: closeSide as 'BUY' | 'SELL',
             remarks: `AUTO SQUARE-OFF ${windowCheck.window!.start}-${
               windowCheck.window!.end ?? '∞'
             } IST`,
           });
 
+          if (!success) {
+            this.logger.error(
+              `❌ Skipping ${pos.tsym} after 3 failed attempts`,
+            );
+            continue; // move to next position
+          }
           // ⏳ wait 2 seconds before next order
           await this.sleep(2000);
         }
@@ -248,4 +266,84 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
   //     this.logger.error('❌ Auto square-off failed', err?.message || err);
   //   }
   // }
+
+  //Add getLimitPrice()
+  private async getLimitPrice(
+    exch: string,
+    token: string,
+    side: 'BUY' | 'SELL',
+  ): Promise<number | undefined> {
+    try {
+      const quote = await this.marketService.getQuotes({
+        exch,
+        token,
+      });
+
+      if (!quote || quote.stat !== 'Ok') {
+        this.logger.error('Quote fetch failed', quote);
+        return undefined;
+      }
+
+      if (side === 'BUY') {
+        return Number(quote.sp5); // best sell
+      } else {
+        return Number(quote.bp5); // best buy
+      }
+    } catch (err) {
+      this.logger.error('getLimitPrice error', err?.stack);
+      return undefined;
+    }
+  }
+
+  //Add Retry Order Function
+  private async placeSquareOffWithRetry(params: {
+    exch: string;
+    token: string;
+    tsym: string;
+    qty: number;
+    side: 'BUY' | 'SELL';
+    remarks: string;
+  }): Promise<boolean> {
+    const MAX_RETRY = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+      try {
+        const price = await this.getLimitPrice(
+          params.exch,
+          params.token,
+          params.side,
+        );
+
+        if (!price) {
+          this.logger.error(`❌ Attempt ${attempt}: Price not available`);
+          continue;
+        }
+
+        this.logger.log(`🟡 Attempt ${attempt}: Square-off LMT @ ${price}`);
+
+        await this.orderService.placeOrder({
+          buy_or_sell: params.side === 'BUY' ? 'B' : 'S',
+          product_type: 'I',
+          exchange: params.exch,
+          tradingsymbol: params.tsym,
+          quantity: params.qty,
+          price_type: 'LMT',
+          price: price,
+          trigger_price: 0,
+          discloseqty: 0,
+          retention: 'DAY',
+          amo: 'NO',
+          remarks: params.remarks,
+        });
+
+        await this.sleep(800); // allow OMS update
+        return true;
+      } catch (err) {
+        this.logger.error(`❌ Attempt ${attempt} failed`, err?.stack || err);
+      }
+    }
+
+    this.logger.error('❌ Square-off failed after 3 attempts');
+    return false;
+  }
 }

@@ -79,20 +79,30 @@ export class TradesExecutionService {
     tradingSymbol: string,
     quantity: number,
   ) {
-    await this.orderService.placeOrder({
-      buy_or_sell: trade.side === 'BUY' ? 'B' : 'S',
-      product_type: this.resolveProductType(trade.productType),
-      exchange: trade.exchange,
-      tradingsymbol: tradingSymbol,
+    // await this.orderService.placeOrder({
+    //   buy_or_sell: trade.side === 'BUY' ? 'B' : 'S',
+    //   product_type: this.resolveProductType(trade.productType),
+    //   exchange: trade.exchange,
+    //   tradingsymbol: tradingSymbol,
+    //   quantity,
+    //   price_type: 'MKT',
+    //   price: 0,
+    //   trigger_price: 0,
+    //   discloseqty: 0,
+    //   retention: 'DAY',
+    //   amo: 'NO',
+    //   remarks: `POSITION INCREASE | ${trade.strategyName}`,
+    // });
+    const success = await this.placeOrderWithRetry({
+      trade,
+      tradingSymbol,
       quantity,
-      price_type: 'MKT',
-      price: 0,
-      trigger_price: 0,
-      discloseqty: 0,
-      retention: 'DAY',
-      amo: 'NO',
-      remarks: `POSITION INCREASE | ${trade.strategyName}`,
+      side: trade.side,
     });
+
+    if (!success) {
+      throw new Error('Failed to increase position after retries');
+    }
 
     this.logger.log(`➕ Increased position by ${quantity}`);
   }
@@ -222,21 +232,31 @@ export class TradesExecutionService {
 
     const closeSide = netQty > 0 ? 'SELL' : 'BUY';
 
-    await this.orderService.placeOrder({
-      buy_or_sell: closeSide === 'BUY' ? 'B' : 'S',
-      product_type: this.resolveProductType(trade.productType),
-      exchange: trade.exchange,
-      tradingsymbol: tradingSymbol,
+    // await this.orderService.placeOrder({
+    //   buy_or_sell: closeSide === 'BUY' ? 'B' : 'S',
+    //   product_type: this.resolveProductType(trade.productType),
+    //   exchange: trade.exchange,
+    //   tradingsymbol: tradingSymbol,
+    //   quantity: Math.abs(netQty),
+    //   price_type: 'MKT',
+    //   price: 0,
+    //   trigger_price: 0,
+    //   discloseqty: 0,
+    //   retention: 'DAY',
+    //   amo: 'NO',
+    //   remarks: 'AUTO CLOSE EXISTING POSITION',
+    // });
+
+    const success = await this.placeOrderWithRetry({
+      trade,
+      tradingSymbol,
       quantity: Math.abs(netQty),
-      price_type: 'MKT',
-      price: 0,
-      trigger_price: 0,
-      discloseqty: 0,
-      retention: 'DAY',
-      amo: 'NO',
-      remarks: 'AUTO CLOSE EXISTING POSITION',
+      side: closeSide as 'BUY' | 'SELL',
     });
 
+    if (!success) {
+      throw new Error('Failed to close position after retries');
+    }
     this.logger.log(
       `🔁 Closed existing ${closeSide} | qty=${Math.abs(netQty)}`,
     );
@@ -438,20 +458,34 @@ Any qty → qty 0	Close all	PLACED
     // =====================================================
     // 🚀 FRESH ENTRY
     // =====================================================
-    await this.orderService.placeOrder({
-      buy_or_sell: trade.side === 'BUY' ? 'B' : 'S',
-      product_type: this.resolveProductType(trade.productType),
-      exchange: trade.exchange,
-      tradingsymbol: tradingSymbol,
+    // await this.orderService.placeOrder({
+    //   buy_or_sell: trade.side === 'BUY' ? 'B' : 'S',
+    //   product_type: this.resolveProductType(trade.productType),
+    //   exchange: trade.exchange,
+    //   tradingsymbol: tradingSymbol,
+    //   quantity: Math.abs(desiredNetQty),
+    //   price_type: 'MKT',
+    //   price: 0,
+    //   trigger_price: 0,
+    //   discloseqty: 0,
+    //   retention: 'DAY',
+    //   amo: 'NO',
+    //   remarks: `AUTO EXEC | ${trade.strategyName}`,
+    // });
+    const success = await this.placeOrderWithRetry({
+      trade,
+      tradingSymbol,
       quantity: Math.abs(desiredNetQty),
-      price_type: 'MKT',
-      price: 0,
-      trigger_price: 0,
-      discloseqty: 0,
-      retention: 'DAY',
-      amo: 'NO',
-      remarks: `AUTO EXEC | ${trade.strategyName}`,
+      side: trade.side,
     });
+
+    if (!success) {
+      await this.tradesService.markTradeFailed(
+        trade._id,
+        'ORDER_FAILED_AFTER_RETRY',
+      );
+      return;
+    }
 
     const verified = await this.verifyNetPosition(
       trade.token,
@@ -464,5 +498,93 @@ Any qty → qty 0	Close all	PLACED
     } else {
       this.logger.warn(`⚠️ Net position mismatch → expected=${desiredNetQty}`);
     }
+  }
+  // =====================================================
+  // 🚀 Add getLimitPrice()
+  // =====================================================
+  private async getLimitPrice(
+    exch: string,
+    token: string,
+    side: 'BUY' | 'SELL',
+  ): Promise<number | undefined> {
+    try {
+      const quote = await this.marketService.getQuotes({
+        exch,
+        token,
+      });
+
+      if (!quote || quote.stat !== 'Ok') {
+        this.logger.error('Quote fetch failed', quote);
+        return undefined;
+      }
+
+      let price: number | undefined;
+
+      if (side === 'BUY') {
+        price = Number(quote.sp5); // best sell price
+      } else {
+        price = Number(quote.bp5); // best buy price
+      }
+
+      return isNaN(price) ? undefined : price;
+    } catch (err) {
+      this.logger.error('getLimitPrice error', err?.stack || err);
+      return undefined;
+    }
+  }
+
+  //
+  // =====================================================
+  // 🚀 Add Retry Order Function
+  // =====================================================
+  private async placeOrderWithRetry(params: {
+    trade: FinalTradeToBePlacedEntity;
+    tradingSymbol: string;
+    quantity: number;
+    side: 'BUY' | 'SELL';
+  }): Promise<boolean> {
+    const MAX_RETRY = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+      try {
+        const price = await this.getLimitPrice(
+          params.trade.exchange,
+          params.trade.token,
+          params.side,
+        );
+
+        if (!price) {
+          this.logger.error(`❌ Attempt ${attempt}: Price not available`);
+          continue;
+        }
+
+        this.logger.log(`🟡 Attempt ${attempt}: Placing LMT order @ ${price}`);
+
+        await this.orderService.placeOrder({
+          buy_or_sell: params.side === 'BUY' ? 'B' : 'S',
+          product_type: this.resolveProductType(params.trade.productType),
+          exchange: params.trade.exchange,
+          tradingsymbol: params.tradingSymbol,
+          quantity: params.quantity,
+          price_type: 'LMT',
+          price: price,
+          trigger_price: 0,
+          discloseqty: 0,
+          retention: 'DAY',
+          amo: 'NO',
+          remarks: `AUTO LMT EXEC | ${params.trade.strategyName}`,
+        });
+
+        // wait small time before verification
+        await new Promise((r) => setTimeout(r, 800));
+
+        return true; // success
+      } catch (err) {
+        this.logger.error(`❌ Attempt ${attempt} failed`, err?.stack || err);
+      }
+    }
+
+    this.logger.error('❌ Order failed after 3 attempts. Stopping.');
+    return false;
   }
 }
