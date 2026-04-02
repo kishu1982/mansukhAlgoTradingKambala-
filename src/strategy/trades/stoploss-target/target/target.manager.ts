@@ -36,7 +36,7 @@ export class TargetManager {
     netPosition,
     tradeBook,
     instrument,
-    config, // ✅ ADD
+    config,
   }: {
     tick: { tk: string; e: string; lp: number };
     netPosition: any;
@@ -46,7 +46,6 @@ export class TargetManager {
       targetFirst: number;
     };
   }) {
-    // defining config target value
     const TARGET_PERCENT = config?.targetFirst ?? this.TARGET_PERCENT;
 
     const token = tick.tk;
@@ -91,24 +90,41 @@ export class TargetManager {
     });
 
     // ===============================
-    // 🚫 TRADE ALREADY CLOSED
+    // 🚫 TRADE CLOSED
     // ===============================
-    if (isTradeAlreadyClosed(track)) {
-      return;
+    if (isTradeAlreadyClosed(track)) return;
+
+    // ===============================
+    // 🔍 CHECK IF TARGET ALREADY EXECUTED
+    // ===============================
+    const placedOrder = track.find((t) => t.action === 'TARGET_ORDER_PLACED');
+
+    if (placedOrder?.orderId) {
+      const matched = tradeBook.find(
+        (t) => t.norenordno === placedOrder.orderId,
+      );
+
+      if (matched) {
+        appendTargetTrack(trackKey, {
+          action: 'TARGET_BOOKED_50_PERCENT',
+        });
+        return;
+      }
     }
 
     // ===============================
-    // 🚫 ALREADY BOOKED 50% (IMPORTANT FIX)
+    // 🚫 ALREADY PLACED
     // ===============================
-    const alreadyBooked50 = track?.some(
-      (t) => t.action === 'TARGET_BOOKED_50_PERCENT',
+    const alreadyPlaced = track?.some(
+      (t) => t.action === 'TARGET_ORDER_PLACED',
     );
 
-    if (alreadyBooked50) {
-      return; // 🔒 Prevent second partial booking
-    }
+    if (alreadyPlaced) return;
 
-    const side = Number(netPosition.netqty) > 0 ? 'BUY' : 'SELL';
+    // ===============================
+    // 🎯 CALCULATE TARGET
+    // ===============================
+    const side = positionSide;
 
     const targetPrice =
       side === 'BUY'
@@ -117,89 +133,422 @@ export class TargetManager {
 
     if (targetPrice <= 0) return;
 
-    const targetHit = side === 'BUY' ? ltp >= targetPrice : ltp <= targetPrice;
+    // ===============================
+    // 📏 DISTANCE FILTER (IMPORTANT)
+    // ===============================
+    const distance = Math.abs(ltp - targetPrice) / ltp;
+    if (distance > 0.05) return;
 
-    if (!targetHit) return;
-
+    // ===============================
+    // 📦 LOT LOGIC
+    // ===============================
     const lotSize = Number(instrument.lotSize || instrument.lotsize || 1);
 
-    if (netQty <= lotSize) {
-      return;
-    }
-
-    // const maxCloseQty = Math.floor(netQty / 2);
-    // const closeQty = Math.floor(maxCloseQty / lotSize) * lotSize;
+    if (netQty <= lotSize) return;
 
     const rawCloseQty = netQty * this.TARGET_EXIT_PERCENT;
-
-    // lot-safe rounding
     const closeQty = Math.floor(rawCloseQty / lotSize) * lotSize;
 
-    if (closeQty < lotSize) {
-      return;
+    if (closeQty < lotSize) return;
+
+    // ===============================
+    // 🔁 RETRY LOGIC
+    // ===============================
+    const retryCount = track.filter(
+      (t) => t.action === 'TARGET_ORDER_RETRY',
+    ).length;
+
+    if (retryCount >= 3) return;
+
+    const lastRetry = [...track]
+      .reverse()
+      .find((t) => t.action === 'TARGET_ORDER_RETRY');
+
+    if (lastRetry) {
+      const lastTime = new Date(lastRetry.time).getTime();
+      if (Date.now() - lastTime < 2000) return;
     }
 
     // ===============================
-    // 🔒 LOCK TO PREVENT DUPLICATE EXECUTION
+    // 🔒 LOCK
     // ===============================
-    if (this.targetLocks.has(trackKey)) {
-      return;
-    }
-
+    if (this.targetLocks.has(trackKey)) return;
     this.targetLocks.add(trackKey);
 
     try {
-      // 🔄 Re-read track inside lock (double safety)
       const latestTrack = readTargetTrack(trackKey);
+
       const bookedInsideLock = latestTrack?.some(
         (t) => t.action === 'TARGET_BOOKED_50_PERCENT',
       );
+      if (bookedInsideLock) return;
 
-      if (bookedInsideLock) {
-        return;
-      }
+      const alreadyPlacedInsideLock = latestTrack?.some(
+        (t) => t.action === 'TARGET_ORDER_PLACED',
+      );
+      if (alreadyPlacedInsideLock) return;
 
-      // await this.ordersService.placeOrder({
-      //   buy_or_sell: side === 'BUY' ? 'S' : 'B',
-      //   product_type: netPosition.prd,
-      //   exchange: tick.e,
-      //   tradingsymbol: instrument.tradingSymbol,
-      //   quantity: closeQty,
-      //   price_type: 'MKT',
-      //   retention: 'DAY',
-      //   remarks: 'AUTO_TARGET_50_PERCENT',
-      // });
+      // ===============================
+      // 💰 PRICE CALCULATION
+      // ===============================
       const roundToTick = (price: number) => Math.round(price * 20) / 20;
 
-      const limitPrice = roundToTick(side === 'BUY' ? ltp - 0.5 : ltp + 0.5);
+      let limitPrice = roundToTick(targetPrice);
 
-      await this.ordersService.placeOrder({
-        buy_or_sell: side === 'BUY' ? 'S' : 'B',
-        product_type: netPosition.prd,
-        exchange: tick.e,
-        tradingsymbol: instrument.tradingSymbol,
-        quantity: closeQty,
-        price_type: 'LMT',
-        price: limitPrice,
-        trigger_price: 0,
-        retention: 'DAY',
-        remarks: 'AUTO_TARGET_50_PERCENT',
-      });
+      if (side === 'BUY') {
+        limitPrice = Math.max(limitPrice, ltp);
+      } else {
+        limitPrice = Math.min(limitPrice, ltp);
+      }
 
-      appendTargetTrack(trackKey, {
-        action: 'TARGET_BOOKED_50_PERCENT',
-        entryPrice,
-        targetPrice,
-        originalNetQty: netQty,
-        closeQty,
-        timestamp: new Date().toISOString(),
-      });
+      // ===============================
+      // 🚀 PLACE ORDER
+      // ===============================
+      try {
+        const res = await this.ordersService.placeOrder({
+          buy_or_sell: side === 'BUY' ? 'S' : 'B',
+          product_type: netPosition.prd,
+          exchange: tick.e,
+          tradingsymbol: instrument.tradingSymbol,
+          quantity: closeQty,
+          price_type: 'LMT',
+          price: limitPrice,
+          trigger_price: 0,
+          retention: 'DAY',
+          remarks: 'AUTO_TARGET_PENDING',
+        });
+
+        const orderId = res?.norenordno;
+
+        if (!orderId) {
+          appendTargetTrack(trackKey, {
+            action: 'TARGET_ORDER_RETRY',
+            reason: 'NO_ORDER_ID',
+          });
+          return;
+        }
+
+        appendTargetTrack(trackKey, {
+          action: 'TARGET_ORDER_PLACED',
+          entryPrice,
+          targetPrice,
+          closeQty,
+          orderId,
+        });
+      } catch (err) {
+        appendTargetTrack(trackKey, {
+          action: 'TARGET_ORDER_RETRY',
+          reason: 'ORDER_FAILED',
+          retryCount: retryCount + 1,
+        });
+      }
     } catch (error) {
-      console.error('Error booking partial target:', error);
+      console.error('Error placing target order:', error);
     } finally {
       this.targetLocks.delete(trackKey);
     }
   }
+
+  // async checkAndProcessTarget({
+  //   tick,
+  //   netPosition,
+  //   tradeBook,
+  //   instrument,
+  //   config, // ✅ ADD
+  // }: {
+  //   tick: { tk: string; e: string; lp: number };
+  //   netPosition: any;
+  //   tradeBook: any[];
+  //   instrument: any;
+  //   config?: {
+  //     targetFirst: number;
+  //   };
+  // }) {
+  //   // defining config target value
+  //   const TARGET_PERCENT = config?.targetFirst ?? this.TARGET_PERCENT;
+
+  //   const token = tick.tk;
+  //   const ltp = tick.lp;
+
+  //   const netQty = Math.abs(Number(netPosition.netqty));
+  //   if (netQty <= 0) return;
+
+  //   const positionSide = Number(netPosition.netqty) > 0 ? 'BUY' : 'SELL';
+  //   const entryTradeSide = positionSide === 'BUY' ? 'B' : 'S';
+
+  //   const entryTrades = tradeBook
+  //     .filter(
+  //       (t) =>
+  //         t.token === token &&
+  //         t.exch === tick.e &&
+  //         t.trantype === entryTradeSide,
+  //     )
+  //     .sort(
+  //       (a, b) => new Date(b.exch_tm).getTime() - new Date(a.exch_tm).getTime(),
+  //     );
+
+  //   if (!entryTrades.length) return;
+
+  //   const entryTrade = entryTrades[0];
+  //   const entryOrderId = entryTrade.norenordno;
+  //   const entryPrice = Number(entryTrade.flprc);
+
+  //   if (!entryOrderId) return;
+
+  //   const trackKey = getTargetTrackKey(token, entryOrderId);
+  //   const track = readTargetTrack(trackKey);
+
+  //   // ===============================
+  //   // 🚀 Time Based Exit
+  //   // ===============================
+  //   await this.handleTimeBasedExit({
+  //     tick,
+  //     netPosition,
+  //     instrument,
+  //     entryOrderId,
+  //   });
+
+  //   // ===============================
+  //   // 🚫 CHECK IF ALREADY PLACED / CLOSED
+  //   // ===============================
+
+  //   // const alreadyPlaced = track?.some(
+  //   //   (t) => t.action === 'TARGET_ORDER_PLACED',
+  //   // );
+
+  //   // const alreadyBooked = track?.some(
+  //   //   (t) => t.action === 'TARGET_BOOKED_50_PERCENT',
+  //   // );
+
+  //   // if (alreadyPlaced || alreadyBooked) {
+  //   //   return;
+  //   // }
+
+  //   // ===============================
+  //   // 🚫 CHECK IF ALREADY PLACED / CLOSED
+  //   // ===============================
+  //   // ===============================
+  //   // 🚫 TRADE ALREADY CLOSED
+  //   // ===============================
+  //   if (isTradeAlreadyClosed(track)) {
+  //     return;
+  //   }
+
+  //   const alreadyPlaced = track?.some(
+  //     (t) => t.action === 'TARGET_ORDER_PLACED',
+  //   );
+
+  //   if (alreadyPlaced) return;
+
+  //   // ===============================
+  //   // 🚫 ALREADY BOOKED 50% (IMPORTANT FIX)
+  //   // ===============================
+  //   // const alreadyBooked50 = track?.some(
+  //   //   (t) => t.action === 'TARGET_BOOKED_50_PERCENT',
+  //   // );
+
+  //   // if (alreadyBooked50) {
+  //   //   return; // 🔒 Prevent second partial booking
+  //   // }
+
+  //   // ===============================
+  //   // 🚫 TRACK AND MARK AND BOOKED 50 PERCENT
+  //   // ===============================
+  //   const alreadyExecuted = track?.some(
+  //     (t) => t.action === 'TARGET_BOOKED_50_PERCENT',
+  //   );
+
+  //   // first safety check after time based exit
+  //   const placedOrder = track.find((t) => t.action === 'TARGET_ORDER_PLACED');
+
+  //   if (placedOrder?.orderId) {
+  //     const matched = tradeBook.find(
+  //       (t) => t.norenordno === placedOrder.orderId,
+  //     );
+
+  //     if (matched) {
+  //       appendTargetTrack(trackKey, {
+  //         action: 'TARGET_BOOKED_50_PERCENT',
+  //       });
+  //       return;
+  //     }
+  //   }
+  //   // second safety check before booking 50 percent
+  //   if (!alreadyExecuted) {
+  //     const exitSide = positionSide === 'BUY' ? 'S' : 'B';
+
+  //     const exitTrades = tradeBook.filter(
+  //       (t) =>
+  //         t.token === token && t.exch === tick.e && t.trantype === exitSide,
+  //     );
+
+  //     if (exitTrades.length > 0) {
+  //       appendTargetTrack(trackKey, {
+  //         action: 'TARGET_BOOKED_50_PERCENT',
+  //       });
+
+  //       return;
+  //     }
+  //   }
+
+  //   const side = Number(netPosition.netqty) > 0 ? 'BUY' : 'SELL';
+
+  //   const targetPrice =
+  //     side === 'BUY'
+  //       ? entryPrice * (1 + TARGET_PERCENT)
+  //       : entryPrice * (1 - TARGET_PERCENT);
+
+  //   if (targetPrice <= 0) return;
+
+  //   // const targetHit = side === 'BUY' ? ltp >= targetPrice : ltp <= targetPrice;
+
+  //   // if (!targetHit) return; // no longer waiting for target to hit
+
+  //   const lotSize = Number(instrument.lotSize || instrument.lotsize || 1);
+
+  //   if (netQty <= lotSize) {
+  //     return;
+  //   }
+
+  //   // const maxCloseQty = Math.floor(netQty / 2);
+  //   // const closeQty = Math.floor(maxCloseQty / lotSize) * lotSize;
+
+  //   const rawCloseQty = netQty * this.TARGET_EXIT_PERCENT;
+
+  //   // lot-safe rounding
+  //   const closeQty = Math.floor(rawCloseQty / lotSize) * lotSize;
+
+  //   if (closeQty < lotSize) {
+  //     return;
+  //   }
+
+  //   // ===============================
+  //   // 🔒 ADD RETRY LOGIC (CORE CHANGE)
+  //   // ===============================
+  //   const retryCount = track.filter(
+  //     (t) => t.action === 'TARGET_ORDER_RETRY',
+  //   ).length;
+
+  //   if (retryCount >= 3) {
+  //     return;
+  //   }
+
+  //   const lastRetry = [...track]
+  //     .reverse()
+  //     .find((t) => t.action === 'TARGET_ORDER_RETRY');
+
+  //   if (lastRetry) {
+  //     const lastTime = new Date(lastRetry.time).getTime();
+  //     if (Date.now() - lastTime < 2000) return;
+  //   }
+
+  //   // ===============================
+  //   // 🔒 LOCK TO PREVENT DUPLICATE EXECUTION
+  //   // ===============================
+  //   if (this.targetLocks.has(trackKey)) {
+  //     return;
+  //   }
+
+  //   this.targetLocks.add(trackKey);
+
+  //   try {
+  //     // 🔄 Re-read track inside lock (double safety)
+  //     const latestTrack = readTargetTrack(trackKey);
+  //     const bookedInsideLock = latestTrack?.some(
+  //       (t) => t.action === 'TARGET_BOOKED_50_PERCENT',
+  //     );
+
+  //     if (bookedInsideLock) {
+  //       return;
+  //     }
+  //     const alreadyPlacedInsideLock = latestTrack?.some(
+  //       (t) => t.action === 'TARGET_ORDER_PLACED',
+  //     );
+
+  //     if (alreadyPlacedInsideLock) {
+  //       return;
+  //     }
+
+  //     // await this.ordersService.placeOrder({
+  //     //   buy_or_sell: side === 'BUY' ? 'S' : 'B',
+  //     //   product_type: netPosition.prd,
+  //     //   exchange: tick.e,
+  //     //   tradingsymbol: instrument.tradingSymbol,
+  //     //   quantity: closeQty,
+  //     //   price_type: 'MKT',
+  //     //   retention: 'DAY',
+  //     //   remarks: 'AUTO_TARGET_50_PERCENT',
+  //     // });
+  //     // const roundToTick = (price: number) => Math.round(price * 20) / 20;
+
+  //     // const limitPrice = roundToTick(side === 'BUY' ? ltp - 0.5 : ltp + 0.5);
+
+  //     const roundToTick = (price: number) => Math.round(price * 20) / 20;
+
+  //     let limitPrice = roundToTick(targetPrice);
+
+  //     // safety adjustment
+  //     if (side === 'BUY') {
+  //       limitPrice = Math.max(limitPrice, ltp);
+  //     } else {
+  //       limitPrice = Math.min(limitPrice, ltp);
+  //     }
+
+  //     // await this.ordersService.placeOrder({
+  //     //   buy_or_sell: side === 'BUY' ? 'S' : 'B',
+  //     //   product_type: netPosition.prd,
+  //     //   exchange: tick.e,
+  //     //   tradingsymbol: instrument.tradingSymbol,
+  //     //   quantity: closeQty,
+  //     //   price_type: 'LMT',
+  //     //   price: limitPrice,
+  //     //   trigger_price: 0,
+  //     //   retention: 'DAY',
+  //     //   remarks: 'AUTO_TARGET_50_PERCENT',
+  //     // });
+
+  //     // appendTargetTrack(trackKey, {
+  //     //   action: 'TARGET_BOOKED_50_PERCENT',
+  //     //   entryPrice,
+  //     //   targetPrice,
+  //     //   originalNetQty: netQty,
+  //     //   closeQty,
+  //     //   timestamp: new Date().toISOString(),
+  //     // });
+  //     try {
+  //       const res = await this.ordersService.placeOrder({
+  //         buy_or_sell: side === 'BUY' ? 'S' : 'B',
+  //         product_type: netPosition.prd,
+  //         exchange: tick.e,
+  //         tradingsymbol: instrument.tradingSymbol,
+  //         quantity: closeQty,
+  //         price_type: 'LMT',
+  //         price: limitPrice,
+  //         trigger_price: 0,
+  //         retention: 'DAY',
+  //         remarks: 'AUTO_TARGET_PENDING',
+  //       });
+
+  //       appendTargetTrack(trackKey, {
+  //         action: 'TARGET_ORDER_PLACED',
+  //         entryPrice,
+  //         targetPrice,
+  //         closeQty,
+  //         orderId: res?.norenordno || null,
+  //       });
+  //     } catch (err) {
+  //       appendTargetTrack(trackKey, {
+  //         action: 'TARGET_ORDER_RETRY',
+  //         reason: 'ORDER_FAILED',
+  //         retryCount: retryCount + 1,
+  //       });
+  //     }
+  //   } catch (error) {
+  //     console.error('Error booking partial target:', error);
+  //   } finally {
+  //     this.targetLocks.delete(trackKey);
+  //   }
+  // }
 
   // async checkAndProcessTarget({
   //   tick,

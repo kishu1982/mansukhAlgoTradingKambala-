@@ -212,8 +212,19 @@ export class StoplossTargetService implements OnModuleInit {
     // ============================
     // CASE-A: POSITION CLOSED
     // ============================
-    if (!position && pendingSL) {
-      await this.cancelPendingSL(pendingSL, 'NET_POSITION_CLOSED');
+    // if (!position && pendingSL) {
+    //   await this.cancelPendingSL(pendingSL, 'NET_POSITION_CLOSED');
+    //   return;
+    // now closing both sl and pending target order if exists as position is closed
+    if (!position) {
+      // cancel SL if exists
+      if (pendingSL) {
+        await this.cancelPendingSL(pendingSL, 'NET_POSITION_CLOSED');
+      }
+
+      // 🔥 NEW: cancel target orders
+      await this.cancelPendingTargetOrders(tick);
+
       return;
     }
 
@@ -1038,5 +1049,33 @@ export class StoplossTargetService implements OnModuleInit {
     if (Number.isNaN(value)) return defaultValue;
 
     return value > 1 ? value / 100 : value;
+  }
+
+
+  // fucntion to close pending target orders when position is closed without triggering sl order (core requirement)
+  private async cancelPendingTargetOrders(tick: NormalizedTick) {
+    try {
+      const openOrders = this.orderBook?.data || [];
+
+      const targetOrders = openOrders.filter(
+        (o) =>
+          o.token === tick.tk &&
+          o.exch === tick.e &&
+          o.prctyp === 'LMT' &&
+          o.status === 'OPEN' &&
+          o.remarks === 'AUTO_TARGET_PENDING',
+      );
+
+      for (const order of targetOrders) {
+        const orderId = this.extractOrderNo(order.orderno || order);
+        if (!orderId) continue;
+
+        await this.ordersService.cancelOrder(orderId);
+
+        this.logger.warn(`🎯 Target cancelled | ${orderId} | POSITION CLOSED`);
+      }
+    } catch (err) {
+      this.logger.error('❌ Failed to cancel target orders', err);
+    }
   }
 }

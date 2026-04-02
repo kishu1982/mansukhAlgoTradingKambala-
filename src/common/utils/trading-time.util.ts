@@ -29,7 +29,7 @@ export function isTradingAllowedForExchange(
     '12:00',
   );
 
-  const breakEnd = configService.get<string>('TRADING_BREAK_END_TIME', '13:45');
+  const breakEnd = configService.get<string>('TRADING_BREAK_END_TIME', '13:00');
 
   // Current IST time
   const now = new Date(

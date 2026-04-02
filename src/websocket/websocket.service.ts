@@ -69,6 +69,12 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
         apikey: token.Access_token, // access token
       };
 
+      // this.logger.debug('Connecting WebSocket with =======> params:', {
+      //   uid: params.uid,
+      //   actid: params.actid,
+      //   apikey: token.Access_token, // hide actual token
+      // });
+
       const callbacks = {
         socket_open: async () => {
           this.isConnected = true;
