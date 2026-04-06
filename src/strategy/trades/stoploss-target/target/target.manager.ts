@@ -48,6 +48,9 @@ export class TargetManager {
       targetFirst: number;
     };
   }) {
+    this.logger.debug(
+      `Checking target for ${tick.e} ${tick.tk} at LTP ${tick.lp} with net position ${netPosition.netqty}`,
+    );
     const TARGET_PERCENT = config?.targetFirst ?? this.TARGET_PERCENT;
 
     const token = tick.tk;
@@ -55,6 +58,9 @@ export class TargetManager {
 
     const netQty = Math.abs(Number(netPosition.netqty));
     if (netQty <= 0) return;
+    this.logger.debug(
+      `Net quantity is ${netQty}, proceeding with target check...`,
+    );
 
     const positionSide = Number(netPosition.netqty) > 0 ? 'BUY' : 'SELL';
     const entryTradeSide = positionSide === 'BUY' ? 'B' : 'S';
@@ -71,12 +77,22 @@ export class TargetManager {
       );
 
     if (!entryTrades.length) return;
+    this.logger.debug(
+      `Found ${entryTrades.length} entry trades, latest at ${entryTrades[0].exch_tm}, proceeding with target check...`,
+    );
 
     const entryTrade = entryTrades[0];
     const entryOrderId = entryTrade.norenordno;
     const entryPrice = Number(entryTrade.flprc);
 
     if (!entryOrderId) return;
+
+    this.logger.debug(
+      `Entry price is ${entryPrice}, calculating target at ${TARGET_PERCENT * 100}%...`,
+    );
+    this.logger.debug(
+      `entryorderid is ${entryOrderId}, token is ${token}, exchange is ${tick.e} checking....`,
+    );
 
     const trackKey = getTargetTrackKey(token, entryOrderId);
     const track = readTargetTrack(trackKey);
@@ -158,6 +174,11 @@ export class TargetManager {
       );
       return;
     }
+    //Validate quantity before placing
+    if (closeQty % lotSize !== 0) {
+      this.logger.error(`❌ INVALID LOT SIZE QUANTITY: ${closeQty}`);
+      return;
+    }
 
     // ===============================
     // 🔁 RETRY LOGIC
@@ -199,20 +220,66 @@ export class TargetManager {
       // ===============================
       // 💰 PRICE CALCULATION
       // ===============================
-      const roundToTick = (price: number) => Math.round(price * 20) / 20;
+      // const roundToTick = (price: number) => Math.round(price * 20) / 20;
+
+      const tickSize = Number(
+        instrument.tickSize || instrument.tick_size || 0.05,
+      );
+
+      const roundToTick = (price: number) =>
+        Math.round(price / tickSize) * tickSize;
 
       let limitPrice = roundToTick(targetPrice);
 
+      // if (side === 'BUY') {
+      //   limitPrice = Math.max(limitPrice, ltp);
+      // } else {
+      //   limitPrice = Math.min(limitPrice, ltp);
+      // }
+
+      // safer pricing for execution
       if (side === 'BUY') {
-        limitPrice = Math.max(limitPrice, ltp);
+        limitPrice = roundToTick(ltp + tickSize);
       } else {
-        limitPrice = Math.min(limitPrice, ltp);
+        limitPrice = roundToTick(ltp - tickSize);
+      }
+
+      // ===============================
+      // 🚀 Updating product type dynamicaly
+      // ===============================
+      let productType = netPosition.prd;
+
+      if (tick.e === 'NFO' || tick.e === 'BFO') {
+        if (!['MIS', 'NRML'].includes(productType)) {
+          productType = 'NRML';
+        }
+      }
+
+      if (tick.e === 'NFO' || tick.e === 'BFO') {
+        this.logger.warn(`⚠️ F&O ORDER FLOW DETECTED`);
       }
 
       // ===============================
       // 🚀 PLACE ORDER
       // ===============================
       try {
+        this.logger.warn(`
+        ========== TARGET DEBUG ==========
+        Exchange: ${tick.e}
+        Symbol: ${instrument.tradingSymbol}
+        Side: ${side}
+        PositionSide: ${positionSide}
+        EntryPrice: ${entryPrice}
+        LTP: ${ltp}
+        TargetPrice: ${targetPrice}
+        LimitPrice: ${limitPrice}
+        LotSize: ${lotSize}
+        NetQty: ${netQty}
+        CloseQty: ${closeQty}
+        ProductType: ${netPosition.prd}
+        =================================
+        `);
+
         const res = await this.ordersService.placeOrder({
           buy_or_sell: side === 'BUY' ? 'S' : 'B',
           product_type: netPosition.prd,
@@ -229,6 +296,9 @@ export class TargetManager {
         this.logger.log(
           `🎯 Target placed | ${res?.norenordno} | ${instrument.tradingSymbol} | at @ ${limitPrice} | Qty: ${closeQty} for AUTO_TARGET_PENDING limit order`,
         );
+
+        // log full response for debugging
+        this.logger.debug(`Order API response: ${JSON.stringify(res)}`);
 
         const orderId = res?.norenordno;
 
@@ -770,7 +840,14 @@ export class TargetManager {
         // });
         const ltp = tick.lp;
 
-        const roundToTick = (price: number) => Math.round(price * 20) / 20;
+        // const roundToTick = (price: number) => Math.round(price * 20) / 20;
+
+        const tickSize = Number(
+          instrument.tickSize || instrument.tick_size || 0.05,
+        );
+
+        const roundToTick = (price: number) =>
+          Math.round(price / tickSize) * tickSize;
 
         const limitPrice = roundToTick(side === 'BUY' ? ltp - 0.5 : ltp + 0.5);
 
