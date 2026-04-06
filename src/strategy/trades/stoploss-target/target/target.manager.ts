@@ -10,11 +10,13 @@ import {
 } from './target.helpers';
 import { processTimeBasedExit } from './timeBasedExit.helper';
 import { IsNumber, IsString } from 'class-validator';
+import { Logger } from '@nestjs/common';
 
 export class TargetManager {
   private readonly TARGET_PERCENT: number;
   private readonly targetLocks = new Set<string>();
   private readonly TARGET_EXIT_PERCENT: number;
+  private readonly logger = new Logger(TargetManager.name);
 
   constructor(
     private readonly ordersService: OrdersService,
@@ -68,7 +70,7 @@ export class TargetManager {
         (a, b) => new Date(b.exch_tm).getTime() - new Date(a.exch_tm).getTime(),
       );
 
-    if (!entryTrades.length) return;
+    if (!entryTrades.length) return; 
 
     const entryTrade = entryTrades[0];
     const entryOrderId = entryTrade.norenordno;
@@ -149,7 +151,12 @@ export class TargetManager {
     const rawCloseQty = netQty * this.TARGET_EXIT_PERCENT;
     const closeQty = Math.floor(rawCloseQty / lotSize) * lotSize;
 
-    if (closeQty < lotSize) return;
+    if (closeQty < lotSize) {
+      this.logger.log(
+        `Calculated close quantity ${closeQty} is less than lot size ${lotSize}, skipping target booking.============================`,
+      );
+      return;
+    }
 
     // ===============================
     // 🔁 RETRY LOGIC
@@ -218,6 +225,9 @@ export class TargetManager {
           remarks: 'AUTO_TARGET_PENDING',
         });
 
+        this.logger.log(
+          `🎯 Target placed | ${res?.norenordno} | ${instrument.tradingSymbol} | at @ ${limitPrice} | Qty: ${closeQty} for AUTO_TARGET_PENDING limit order`,
+        );
         const orderId = res?.norenordno;
 
         if (!orderId) {

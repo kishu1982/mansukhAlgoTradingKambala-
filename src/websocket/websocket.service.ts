@@ -93,10 +93,17 @@ export class WebsocketService implements OnModuleInit, OnModuleDestroy {
             // await this.subscribeGroup('DEFAULT');
             this.startSubscriptionAutoRefresh(); // 👈 NEW
           } catch (error) {
-            this.logger.error(
-              'Failed to subscribe websocket instruments',
-              error.stack,
-            );
+            if (error instanceof Error) {
+              this.logger.error(
+                'Failed to subscribe websocket instruments',
+                error.stack,
+              );
+            } else {
+              this.logger.error(
+                'Failed to subscribe websocket instruments',
+                String(error),
+              );
+            }
           }
         },
 
