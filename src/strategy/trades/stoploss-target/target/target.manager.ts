@@ -58,9 +58,9 @@ export class TargetManager {
 
     const netQty = Math.abs(Number(netPosition.netqty));
     if (netQty <= 0) return;
-    this.logger.debug(
-      `Net quantity is ${netQty}, proceeding with target check...`,
-    );
+    // this.logger.debug(
+    //   `Net quantity is ${netQty}, proceeding with target check...`,
+    // );
 
     const positionSide = Number(netPosition.netqty) > 0 ? 'BUY' : 'SELL';
     const entryTradeSide = positionSide === 'BUY' ? 'B' : 'S';
@@ -152,7 +152,7 @@ export class TargetManager {
 
     if (targetPrice <= 0) return;
 
-   // ===============================
+    // ===============================
     // 📏 DISTANCE FILTER (IMPORTANT)
     // ===============================
     // const distance = Math.abs(ltp - targetPrice) / ltp;
@@ -165,7 +165,6 @@ export class TargetManager {
       return;
       //done
     }
-
 
     // ===============================
     // 📦 LOT LOGIC
