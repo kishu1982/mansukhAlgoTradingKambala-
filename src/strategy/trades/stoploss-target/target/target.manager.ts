@@ -48,9 +48,9 @@ export class TargetManager {
       targetFirst: number;
     };
   }) {
-    this.logger.debug(
-      `Checking target for ${tick.e} ${tick.tk} at LTP ${tick.lp} with net position ${netPosition.netqty}`,
-    );
+    // this.logger.debug(
+    //   `Checking target for ${tick.e} ${tick.tk} at LTP ${tick.lp} with net position ${netPosition.netqty}`,
+    // );
     const TARGET_PERCENT = config?.targetFirst ?? this.TARGET_PERCENT;
 
     const token = tick.tk;
@@ -77,9 +77,9 @@ export class TargetManager {
       );
 
     if (!entryTrades.length) return;
-    this.logger.debug(
-      `Found ${entryTrades.length} entry trades, latest at ${entryTrades[0].exch_tm}, proceeding with target check...`,
-    );
+    // this.logger.debug(
+    //   `Found ${entryTrades.length} entry trades, latest at ${entryTrades[0].exch_tm}, proceeding with target check...`,
+    // );
 
     const entryTrade = entryTrades[0];
     const entryOrderId = entryTrade.norenordno;
@@ -90,9 +90,9 @@ export class TargetManager {
     this.logger.debug(
       `Entry price is ${entryPrice}, calculating target at ${TARGET_PERCENT * 100}%...`,
     );
-    this.logger.debug(
-      `entryorderid is ${entryOrderId}, token is ${token}, exchange is ${tick.e} checking....`,
-    );
+    // this.logger.debug(
+    //   `entryorderid is ${entryOrderId}, token is ${token}, exchange is ${tick.e} checking....`,
+    // );
 
     const trackKey = getTargetTrackKey(token, entryOrderId);
     const track = readTargetTrack(trackKey);
