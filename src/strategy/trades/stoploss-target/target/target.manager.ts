@@ -48,9 +48,9 @@ export class TargetManager {
       targetFirst: number;
     };
   }) {
-    this.logger.debug(
-      `Checking target for ${tick.e} ${tick.tk} at LTP ${tick.lp} with net position ${netPosition.netqty}`,
-    );
+    // this.logger.debug(
+    //   `Checking target for ${tick.e} ${tick.tk} at LTP ${tick.lp} with net position ${netPosition.netqty}`,
+    // );
     const TARGET_PERCENT = config?.targetFirst ?? this.TARGET_PERCENT;
 
     const token = tick.tk;
@@ -58,9 +58,9 @@ export class TargetManager {
 
     const netQty = Math.abs(Number(netPosition.netqty));
     if (netQty <= 0) return;
-    this.logger.debug(
-      `Net quantity is ${netQty}, proceeding with target check...`,
-    );
+    // this.logger.debug(
+    //   `Net quantity is ${netQty}, proceeding with target check...`,
+    // );
 
     const positionSide = Number(netPosition.netqty) > 0 ? 'BUY' : 'SELL';
     const entryTradeSide = positionSide === 'BUY' ? 'B' : 'S';
@@ -77,9 +77,9 @@ export class TargetManager {
       );
 
     if (!entryTrades.length) return;
-    this.logger.debug(
-      `Found ${entryTrades.length} entry trades, latest at ${entryTrades[0].exch_tm}, proceeding with target check...`,
-    );
+    // this.logger.debug(
+    //   `Found ${entryTrades.length} entry trades, latest at ${entryTrades[0].exch_tm}, proceeding with target check...`,
+    // );
 
     const entryTrade = entryTrades[0];
     const entryOrderId = entryTrade.norenordno;
@@ -90,9 +90,9 @@ export class TargetManager {
     this.logger.debug(
       `Entry price is ${entryPrice}, calculating target at ${TARGET_PERCENT * 100}%...`,
     );
-    this.logger.debug(
-      `entryorderid is ${entryOrderId}, token is ${token}, exchange is ${tick.e} checking....`,
-    );
+    // this.logger.debug(
+    //   `entryorderid is ${entryOrderId}, token is ${token}, exchange is ${tick.e} checking....`,
+    // );
 
     const trackKey = getTargetTrackKey(token, entryOrderId);
     const track = readTargetTrack(trackKey);
@@ -116,6 +116,10 @@ export class TargetManager {
     // 🔍 CHECK IF TARGET ALREADY EXECUTED
     // ===============================
     const placedOrder = track.find((t) => t.action === 'TARGET_ORDER_PLACED');
+
+    // this.logger.debug(
+    //   `Found placed order for ${trackKey}: ${JSON.stringify(placedOrder?.orderId)}`,
+    // );
 
     if (placedOrder?.orderId) {
       const matched = tradeBook.find(
@@ -154,13 +158,22 @@ export class TargetManager {
     // ===============================
     // 📏 DISTANCE FILTER (IMPORTANT)
     // ===============================
+    // const distance = Math.abs(ltp - targetPrice) / ltp;
+    // if (distance > 0.05) return;
     const distance = Math.abs(ltp - targetPrice) / ltp;
-    if (distance > 0.05) return;
+
+    // skip ONLY if extremely far (like bad calculation)
+    if (distance > 1) {
+      this.logger.warn(`❌ Target too far. Skipping. Distance: ${distance}`);
+      return;
+    }
 
     // ===============================
     // 📦 LOT LOGIC
     // ===============================
     const lotSize = Number(instrument.lotSize || instrument.lotsize || 1);
+
+    this.logger.debug(`Lot size for ${instrument.tradingSymbol} is ${lotSize}`);
 
     if (netQty <= lotSize) return;
 
