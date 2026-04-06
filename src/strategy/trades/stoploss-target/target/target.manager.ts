@@ -166,6 +166,7 @@ export class TargetManager {
     if (distance > 1) {
       this.logger.warn(`❌ Target too far. Skipping. Distance: ${distance}`);
       return;
+      //done
     }
 
     // ===============================
