@@ -145,10 +145,15 @@ export class TargetManager {
     // ===============================
     const side = positionSide;
 
-    const targetPrice =
+    // ===============================
+    // 🎯 CALCULATE TARGET (FIXED PRECISION)
+    // ===============================
+    const targetPriceRaw =
       side === 'BUY'
         ? entryPrice * (1 + TARGET_PERCENT)
         : entryPrice * (1 - TARGET_PERCENT);
+
+    const targetPrice = Number(targetPriceRaw.toFixed(2));
 
     if (targetPrice <= 0) return;
 
@@ -231,6 +236,9 @@ export class TargetManager {
       // ===============================
       // const roundToTick = (price: number) => Math.round(price * 20) / 20;
 
+      // ===============================
+      // 💰 PRICE CALCULATION
+      // ===============================
       const tickSize = Number(
         instrument.tickSize || instrument.tick_size || 0.05,
       );
@@ -238,20 +246,36 @@ export class TargetManager {
       const roundToTick = (price: number) =>
         Math.round(price / tickSize) * tickSize;
 
+      // default → pending target order
       let limitPrice = roundToTick(targetPrice);
 
-      // if (side === 'BUY') {
-      //   limitPrice = Math.max(limitPrice, ltp);
-      // } else {
-      //   limitPrice = Math.min(limitPrice, ltp);
-      // }
+      // ===============================
+      // ⚡ TARGET HIT → EXECUTE IMMEDIATELY
+      // ===============================
+      const isTargetHit =
+        (side === 'BUY' && ltp >= targetPrice) ||
+        (side === 'SELL' && ltp <= targetPrice);
 
-      // safer pricing for execution
-      if (side === 'BUY') {
-        limitPrice = roundToTick(ltp + tickSize);
-      } else {
-        limitPrice = roundToTick(ltp - tickSize);
+      if (isTargetHit) {
+        this.logger.warn(`⚡ Target already crossed, placing aggressive order`);
+
+        // IMPORTANT: reverse side execution
+        if (side === 'BUY') {
+          limitPrice = roundToTick(ltp - tickSize); // SELL
+        } else {
+          limitPrice = roundToTick(ltp + tickSize); // BUY
+        }
       }
+      // ===============================
+      // 🧾 DEBUG LOG
+      // ===============================
+      this.logger.warn(`
+PRICE DEBUG:
+TargetPrice: ${targetPrice}
+FinalLimitPrice: ${limitPrice}
+LTP: ${ltp}
+TickSize: ${tickSize}
+`);
 
       // ===============================
       // 🚀 Updating product type dynamicaly
@@ -289,9 +313,12 @@ export class TargetManager {
         =================================
         `);
 
+        // ===============================
+        // 🚀 PLACE ORDER (UNCHANGED PRODUCT TYPE)
+        // ===============================
         const res = await this.ordersService.placeOrder({
           buy_or_sell: side === 'BUY' ? 'S' : 'B',
-          product_type: netPosition.prd,
+          product_type: netPosition.prd, // ✅ as per your requirement
           exchange: tick.e,
           tradingsymbol: instrument.tradingSymbol,
           quantity: closeQty,
