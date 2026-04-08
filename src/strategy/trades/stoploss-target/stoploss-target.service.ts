@@ -47,6 +47,8 @@ export class StoplossTargetService implements OnModuleInit {
   private positionState = new Map<string, PositionLifecycleState>();
 
   private slPlacementLock = new Set<string>();
+  private slPlacedMap = new Map<string, string>();
+  // token -> orderId
 
   // ===============================
   // 📦 INSTRUMENT MASTER
@@ -222,6 +224,9 @@ export class StoplossTargetService implements OnModuleInit {
         await this.cancelPendingSL(pendingSL, 'NET_POSITION_CLOSED');
       }
 
+      // ✅ CLEAR STATE
+      this.slPlacedMap.delete(tick.tk);
+
       // 🔥 NEW: cancel target orders
       await this.cancelPendingTargetOrders(tick);
 
@@ -321,10 +326,30 @@ export class StoplossTargetService implements OnModuleInit {
     // =====================================================
     // STEP-2 — INITIAL SL
     // =====================================================
-    if (!pendingSL) {
-      if (this.slPlacementLock.has(tick.tk)) return;
-      this.slPlacementLock.add(tick.tk);
+    // if (!pendingSL) {
+    //   if (this.slPlacementLock.has(tick.tk)) return;
+    //   this.slPlacementLock.add(tick.tk);
+    const existingSL = this.slPlacedMap.get(tick.tk);
 
+    // if (existingSL && !pendingSL) {
+    //   this.slPlacedMap.delete(tick.tk);
+    // }
+    if (existingSL && !pendingSL) {
+      // double-check using orderBook
+      const stillExists = this.orderBook.data.some(
+        (o) =>
+          o.token === tick.tk &&
+          o.prctyp === 'SL-LMT' &&
+          (o.status === 'TRIGGER_PENDING' || o.status === 'OPEN'),
+      );
+
+      if (!stillExists) {
+        this.logger.warn(`🧹 Clearing stale SL map | token=${tick.tk}`);
+        this.slPlacedMap.delete(tick.tk);
+      }
+    }
+
+    if (!pendingSL && !existingSL) {
       try {
         // 🔥 ALWAYS USE MARKET PRICE SCALE
         const entryPrice = ltp; // tick.lp is true traded price
@@ -368,6 +393,9 @@ export class StoplossTargetService implements OnModuleInit {
         const orderId = this.extractOrderNo(res);
         if (!orderId) return;
 
+        // ✅ STORE SL STATE
+        this.slPlacedMap.set(tick.tk, orderId);
+
         const standardDiff = entryPrice * SL_PERCENT;
 
         this.appendOrderLog(orderId, {
@@ -410,7 +438,10 @@ export class StoplossTargetService implements OnModuleInit {
     // =====================================================
     // STEP-3 + STEP-4 — TRAILING WITH FIRST PROFIT STAGE
     // =====================================================
-    const orderId = this.extractOrderNo(pendingSL.orderno || pendingSL);
+    // const orderId = this.extractOrderNo(pendingSL.orderno || pendingSL);
+    if (!pendingSL) return;
+
+    const orderId = this.extractOrderNo(pendingSL?.orderno || pendingSL);
     if (!orderId) return;
 
     const track = this.readOrderTrack(orderId);
@@ -600,6 +631,12 @@ export class StoplossTargetService implements OnModuleInit {
 
     await this.ordersService.cancelOrder(orderId);
 
+    // ✅ IMPORTANT: remove from map
+    const token = order.token; // or pass tick.tk if safer
+    if (token) {
+      this.slPlacedMap.delete(token);
+    }
+
     this.appendOrderLog(orderId, {
       action: 'SL_CANCELLED',
       reason,
@@ -745,7 +782,8 @@ export class StoplossTargetService implements OnModuleInit {
       // No mismatch → nothing to do
       if (slQty === netQty) return;
 
-      const orderId = this.extractOrderNo(pendingSL.orderno || pendingSL);
+      // const orderId = this.extractOrderNo(pendingSL.orderno || pendingSL);
+      const orderId = this.extractOrderNo(pendingSL?.orderno ?? pendingSL);
       if (!orderId) return;
 
       this.logger.log(`pending sl data: ${JSON.stringify(pendingSL)}`);
@@ -1051,7 +1089,6 @@ export class StoplossTargetService implements OnModuleInit {
     return value > 1 ? value / 100 : value;
   }
 
-
   // fucntion to close pending target orders when position is closed without triggering sl order (core requirement)
   private async cancelPendingTargetOrders(tick: NormalizedTick) {
     try {
@@ -1067,7 +1104,8 @@ export class StoplossTargetService implements OnModuleInit {
       );
 
       for (const order of targetOrders) {
-        const orderId = this.extractOrderNo(order.orderno || order);
+        // const orderId = this.extractOrderNo(order.orderno || order);
+        const orderId = this.extractOrderNo(order?.orderno ?? order);
         if (!orderId) continue;
 
         await this.ordersService.cancelOrder(orderId);
