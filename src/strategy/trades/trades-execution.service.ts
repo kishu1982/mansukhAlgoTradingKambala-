@@ -201,7 +201,7 @@ export class TradesExecutionService {
     exchange: string,
     expectedNetQty: number,
     retries = 3,
-    delayMs = 1000,
+    delayMs = 2000,
   ): Promise<boolean> {
     for (let i = 1; i <= retries; i++) {
       await new Promise((r) => setTimeout(r, delayMs));
@@ -384,8 +384,13 @@ Any qty → qty 0	Close all	PLACED
 
         const ok = await this.verifyNetPosition(trade.token, trade.exchange, 0);
 
-        if (ok) {
-          await this.tradesService.markTradePlaced(trade._id);
+        // if (ok) {
+        //   await this.tradesService.markTradePlaced(trade._id);
+        // }
+        await this.tradesService.markTradePlaced(trade._id);
+
+        if (!ok) {
+          this.logger.warn(`⚠️ Close position not yet reflected`);
         }
       } else {
         await this.tradesService.markTradePlaced(trade._id);
@@ -437,8 +442,13 @@ Any qty → qty 0	Close all	PLACED
         desiredNetQty,
       );
 
-      if (verified) {
-        await this.tradesService.markTradePlaced(trade._id);
+      // if (verified) {
+      //   await this.tradesService.markTradePlaced(trade._id);
+      // }
+      await this.tradesService.markTradePlaced(trade._id);
+
+      if (!verified) {
+        this.logger.warn(`⚠️ Increase position not yet reflected`);
       }
 
       return;
@@ -487,16 +497,20 @@ Any qty → qty 0	Close all	PLACED
       return;
     }
 
+    // ✅ MARK AS PLACED IMMEDIATELY (CRITICAL FIX)
+    await this.tradesService.markTradePlaced(trade._id);
+
+    // Optional: background verification only for logging
     const verified = await this.verifyNetPosition(
       trade.token,
       trade.exchange,
       desiredNetQty,
     );
 
-    if (verified) {
-      await this.tradesService.markTradePlaced(trade._id);
-    } else {
-      this.logger.warn(`⚠️ Net position mismatch → expected=${desiredNetQty}`);
+    if (!verified) {
+      this.logger.warn(
+        `⚠️ Position not updated yet (LIMIT order may be pending fill)`,
+      );
     }
   }
   // =====================================================
@@ -547,6 +561,17 @@ Any qty → qty 0	Close all	PLACED
 
     for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
       try {
+        if (attempt > 1) {
+          this.logger.warn(
+            `🧹 Cancelling previous pending orders before retry`,
+          );
+
+          await this.cancelPendingOrdersForToken(
+            params.trade.token,
+            params.trade.exchange,
+          );
+        }
+
         const price = await this.getLimitPrice(
           params.trade.exchange,
           params.trade.token,
@@ -558,9 +583,9 @@ Any qty → qty 0	Close all	PLACED
           continue;
         }
 
-        this.logger.log(`🟡 Attempt ${attempt}: Placing LMT order @ ${price}`);
+        this.logger.log(`🟡 Attempt ${attempt}: Placing LMT @ ${price}`);
 
-        await this.orderService.placeOrder({
+        const response = await this.orderService.placeOrder({
           buy_or_sell: params.side === 'BUY' ? 'B' : 'S',
           product_type: this.resolveProductType(params.trade.productType),
           exchange: params.trade.exchange,
@@ -575,16 +600,128 @@ Any qty → qty 0	Close all	PLACED
           remarks: `AUTO LMT EXEC | ${params.trade.strategyName}`,
         });
 
-        // wait small time before verification
-        await new Promise((r) => setTimeout(r, 800));
+        if (!response || response.stat !== 'Ok') {
+          this.logger.error(`❌ Attempt ${attempt}: Order rejected`, response);
+          continue;
+        }
 
-        return true; // success
+        this.logger.log(`✅ Order accepted (Attempt ${attempt})`);
+
+        const expectedNetQty =
+          (await this.getAggregatedNetPosition(
+            params.trade.token,
+            params.trade.exchange,
+          )) + (params.side === 'BUY' ? params.quantity : -params.quantity);
+
+        // ⏳ WAIT FOR EXECUTION
+        const verified = await this.verifyNetPosition(
+          params.trade.token,
+          params.trade.exchange,
+          expectedNetQty,
+          2, // retries
+          1500, // delay
+        );
+
+        if (verified) {
+          this.logger.log(`🎯 Position built successfully`);
+          return true;
+        }
+
+        // 🔥 NEW LOGIC: Check if order exists in order book
+        const orderBook = await this.orderService.getOrderBook();
+
+        const exists = orderBook?.trades?.some(
+          (o) =>
+            o.token === params.trade.token &&
+            o.exch === params.trade.exchange &&
+            ['OPEN', 'PENDING', 'TRIGGER_PENDING', 'COMPLETE'].includes(
+              o.status,
+            ),
+        );
+
+        if (exists) {
+          this.logger.log(`✅ Order exists in system → stopping retry`);
+          return true;
+        }
+        // 🔁 If not filled and not in order book, retry
+
+        this.logger.warn(`⚠️ Order not filled, retrying...`);
       } catch (err) {
         this.logger.error(`❌ Attempt ${attempt} failed`, err?.stack || err);
       }
     }
 
-    this.logger.error('❌ Order failed after 3 attempts. Stopping.');
+    this.logger.error('❌ Order failed after 3 attempts (not filled)');
     return false;
   }
+
+  // private async placeOrderWithRetry(params: {
+  //   trade: FinalTradeToBePlacedEntity;
+  //   tradingSymbol: string;
+  //   quantity: number;
+  //   side: 'BUY' | 'SELL';
+  // }): Promise<boolean> {
+  //   const MAX_RETRY = 3;
+
+  //   for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+  //     try {
+  //       const price = await this.getLimitPrice(
+  //         params.trade.exchange,
+  //         params.trade.token,
+  //         params.side,
+  //       );
+
+  //       if (!price) {
+  //         this.logger.error(`❌ Attempt ${attempt}: Price not available`);
+  //         continue;
+  //       }
+
+  //       this.logger.log(`🟡 Attempt ${attempt}: Placing LMT order @ ${price}`);
+
+  //       // await this.orderService.placeOrder({
+  //       //   buy_or_sell: params.side === 'BUY' ? 'B' : 'S',
+  //       //   product_type: this.resolveProductType(params.trade.productType),
+  //       //   exchange: params.trade.exchange,
+  //       //   tradingsymbol: params.tradingSymbol,
+  //       //   quantity: params.quantity,
+  //       //   price_type: 'LMT',
+  //       //   price: price,
+  //       //   trigger_price: 0,
+  //       //   discloseqty: 0,
+  //       //   retention: 'DAY',
+  //       //   amo: 'NO',
+  //       //   remarks: `AUTO LMT EXEC | ${params.trade.strategyName}`,
+  //       // });
+  //       const response = await this.orderService.placeOrder({
+  //         buy_or_sell: params.side === 'BUY' ? 'B' : 'S',
+  //         product_type: this.resolveProductType(params.trade.productType),
+  //         exchange: params.trade.exchange,
+  //         tradingsymbol: params.tradingSymbol,
+  //         quantity: params.quantity,
+  //         price_type: 'LMT',
+  //         price: price,
+  //         trigger_price: 0,
+  //         discloseqty: 0,
+  //         retention: 'DAY',
+  //         amo: 'NO',
+  //         remarks: `AUTO LMT EXEC | ${params.trade.strategyName}`,
+  //       });
+
+  //       if (!response || response.stat !== 'Ok') {
+  //         this.logger.error(`❌ Attempt ${attempt}: Order rejected`, response);
+  //         continue; // retry
+  //       }
+
+  //       // wait small time before verification
+  //       await new Promise((r) => setTimeout(r, 800));
+
+  //       return true; // success
+  //     } catch (err) {
+  //       this.logger.error(`❌ Attempt ${attempt} failed`, err?.stack || err);
+  //     }
+  //   }
+
+  //   this.logger.error('❌ Order failed after 3 attempts. Stopping.');
+  //   return false;
+  // }
 }
