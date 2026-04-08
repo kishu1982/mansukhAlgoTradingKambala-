@@ -11,7 +11,8 @@ import { TradingviewTradeConfigService } from 'src/strategy/tradingview-trade-co
 import { StoplossTargetService } from 'src/strategy/trades/stoploss-target/stoploss-target.service';
 import { read } from 'fs';
 
-const NorenWebSocket = require('norenrestapi/lib/websocket');
+// const NorenWebSocket = require('norenrestapi/lib/websocket');
+const NorenWebSocket = require('../../norenrestapi/lib/websocket');
 
 @Injectable()
 export class WebsocketService implements OnModuleInit, OnModuleDestroy {

@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TokenService } from 'src/token/token.service';
 
-const NorenRestApi = require('norenrestapi/lib/restapi');
+// const NorenRestApi = require('norenrestapi/lib/restapi');
+const NorenRestApi = require('../../norenrestapi/lib/RestApi');
 
 @Injectable()
 export class AuthService {
