@@ -172,12 +172,23 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
           //     windowCheck.window!.end ?? '∞'
           //   } IST`,
           // });
+          // const success = await this.placeSquareOffWithRetry({
+          //   exch: pos.exch,
+          //   token: pos.token, // ⚠️ IMPORTANT: ensure token exists in pos
+          //   tsym: pos.tsym,
+          //   qty: closeQty,
+          //   side: closeSide as 'BUY' | 'SELL',
+          //   remarks: `AUTO SQUARE-OFF ${windowCheck.window!.start}-${
+          //     windowCheck.window!.end ?? '∞'
+          //   } IST`,
+          // });
           const success = await this.placeSquareOffWithRetry({
             exch: pos.exch,
-            token: pos.token, // ⚠️ IMPORTANT: ensure token exists in pos
+            token: pos.token,
             tsym: pos.tsym,
             qty: closeQty,
             side: closeSide as 'BUY' | 'SELL',
+            productType: pos.prd as 'C' | 'M' | 'H' | 'I', // ✅ FIX
             remarks: `AUTO SQUARE-OFF ${windowCheck.window!.start}-${
               windowCheck.window!.end ?? '∞'
             } IST`,
@@ -296,12 +307,21 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
   }
 
   //Add Retry Order Function
+  // private async placeSquareOffWithRetry(params: {
+  //   exch: string;
+  //   token: string;
+  //   tsym: string;
+  //   qty: number;
+  //   side: 'BUY' | 'SELL';
+  //   remarks: string;
+  // }): Promise<boolean>
   private async placeSquareOffWithRetry(params: {
     exch: string;
     token: string;
     tsym: string;
     qty: number;
     side: 'BUY' | 'SELL';
+    productType: 'C' | 'M' | 'H' | 'I';
     remarks: string;
   }): Promise<boolean> {
     const MAX_RETRY = 3;
@@ -321,9 +341,24 @@ private readonly SQUARE_OFF_END_TIME = undefined; // in case given undefined the
 
         this.logger.log(`🟡 Attempt ${attempt}: Square-off LMT @ ${price}`);
 
+        // await this.orderService.placeOrder({
+        //   buy_or_sell: params.side === 'BUY' ? 'B' : 'S',
+        //   // product_type: 'I',
+        //   product_type: params.productType,
+        //   exchange: params.exch,
+        //   tradingsymbol: params.tsym,
+        //   quantity: params.qty,
+        //   price_type: 'LMT',
+        //   price: price,
+        //   trigger_price: 0,
+        //   discloseqty: 0,
+        //   retention: 'DAY',
+        //   amo: 'NO',
+        //   remarks: params.remarks,
+        // });
         await this.orderService.placeOrder({
           buy_or_sell: params.side === 'BUY' ? 'B' : 'S',
-          product_type: 'I',
+          product_type: params.productType, // ✅ dynamic
           exchange: params.exch,
           tradingsymbol: params.tsym,
           quantity: params.qty,

@@ -270,12 +270,12 @@ export class TargetManager {
       // 🧾 DEBUG LOG
       // ===============================
       this.logger.warn(`
-PRICE DEBUG:
-TargetPrice: ${targetPrice}
-FinalLimitPrice: ${limitPrice}
-LTP: ${ltp}
-TickSize: ${tickSize}
-`);
+      PRICE DEBUG:
+      TargetPrice: ${targetPrice}
+      FinalLimitPrice: ${limitPrice}
+      LTP: ${ltp}
+      TickSize: ${tickSize}
+      `);
 
       // ===============================
       // 🚀 Updating product type dynamicaly
