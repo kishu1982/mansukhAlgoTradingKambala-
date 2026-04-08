@@ -12,7 +12,7 @@ import { StoplossTargetService } from 'src/strategy/trades/stoploss-target/stopl
 import { read } from 'fs';
 
 // const NorenWebSocket = require('norenrestapi/lib/websocket');
-const NorenWebSocket = require('../../norenrestapi/lib/websocket');
+const NorenWebSocket = require('../../norenrestapi/lib/WebSocket');
 
 @Injectable()
 export class WebsocketService implements OnModuleInit, OnModuleDestroy {

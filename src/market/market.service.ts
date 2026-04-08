@@ -14,8 +14,8 @@ import * as path from 'path';
 import AdmZip from 'adm-zip';
 import { parse } from 'csv-parse/sync';
 
+const NorenRestApi = require('../../norenrestapi/lib/RestApi');
 // const NorenRestApi = require('norenrestapi/lib/restapi');
-const NorenRestApi = require('../../norenrestapi/lib/restapi');
 
 @Injectable()
 export class MarketService {

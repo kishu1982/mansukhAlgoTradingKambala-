@@ -14,7 +14,7 @@ import { TelegramService } from 'src/telegram/telegram.service';
 
 // const NorenRestApi = require('norenrestapi/lib/restapi');
 // const NorenRestApi = require('norenrestapi/lib/restapi');
-const NorenRestApi = require('../../norenrestapi/lib/restapi');
+const NorenRestApi = require('../../norenrestapi/lib/RestApi');
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
