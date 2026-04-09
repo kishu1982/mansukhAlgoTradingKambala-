@@ -8,6 +8,11 @@ import { ConfigService } from '@nestjs/config';
 import { TargetManager } from './target/target.manager';
 import { isTradingAllowedForExchange } from 'src/common/utils/trading-time.util';
 
+//--------------------------------
+//Flow in one line:
+//👉 Tick → Validate → Find Position → Place SL → Sync → Trail → Manage Target → Cleanup
+//-------------------------------
+
 interface CachedBlock<T> {
   data: T;
   updatedAt: number;
